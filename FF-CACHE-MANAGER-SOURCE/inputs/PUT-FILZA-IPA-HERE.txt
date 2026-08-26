@@ -1,0 +1,1 @@
+Place FilzaSlop_1.0.3.ipa in this folder, or pass -FilzaIpa to BUILD-WINDOWS.ps1.
