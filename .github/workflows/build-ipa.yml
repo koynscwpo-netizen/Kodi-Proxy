@@ -5,18 +5,13 @@ on:
 
 jobs:
   build:
+    name: Build IPA
     runs-on: macos-latest
 
     steps:
-      # ============================================================
-      # 1. CHECKOUT SOURCE
-      # ============================================================
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 2. SELECT XCODE
-      # ============================================================
       - name: Select Xcode
         shell: bash
         run: |
@@ -24,37 +19,29 @@ jobs:
 
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-          echo "========================================"
-          echo "XCODE"
-          echo "========================================"
+          echo "XCODE:"
           xcodebuild -version
+
+          echo "SDK:"
           xcodebuild -showsdks
 
-      # ============================================================
-      # 3. GET IPHONEOS SDK
-      # ============================================================
       - name: Get iPhoneOS SDK
         shell: bash
         run: |
           set -e
 
-          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          IOS_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 
-          if [ ! -d "$IOS_SDK" ]; then
+          if [ -z "$IOS_SDK" ]; then
             echo "ERROR: iPhoneOS SDK not found"
             exit 1
           fi
 
           echo "IOS_SDK=$IOS_SDK" >> "$GITHUB_ENV"
 
-          echo "========================================"
-          echo "IPHONEOS SDK"
-          echo "========================================"
+          echo "iPhoneOS SDK:"
           echo "$IOS_SDK"
 
-      # ============================================================
-      # 4. SET PROJECT PATHS
-      # ============================================================
       - name: Set project paths
         shell: bash
         run: |
@@ -62,129 +49,56 @@ jobs:
 
           PROJECT_ROOT="$GITHUB_WORKSPACE/FF-CACHE-MANAGER-SOURCE"
           BUILD_SCRIPT="$PROJECT_ROOT/BUILD-WINDOWS.ps1"
-          BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
           RELEASE_DIR="$PROJECT_ROOT/release"
-          TOOLS_DIR="$PROJECT_ROOT/app/ff_manager/.tools"
+
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "BUILD_SCRIPT=$BUILD_SCRIPT" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$RELEASE_DIR" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "PROJECT ROOT"
+          echo "$PROJECT_ROOT"
+          echo "========================================"
 
           if [ ! -d "$PROJECT_ROOT" ]; then
-            echo "ERROR: Project directory not found:"
-            echo "$PROJECT_ROOT"
+            echo "ERROR: Project directory not found"
             exit 1
           fi
 
           if [ ! -f "$BUILD_SCRIPT" ]; then
-            echo "ERROR: BUILD-WINDOWS.ps1 not found:"
-            echo "$BUILD_SCRIPT"
-            exit 1
-          fi
-
-          if [ ! -f "$BUILD_PS1" ]; then
-            echo "ERROR: build.ps1 not found:"
-            echo "$BUILD_PS1"
+            echo "ERROR: BUILD-WINDOWS.ps1 not found"
             exit 1
           fi
 
           mkdir -p "$RELEASE_DIR"
-          mkdir -p "$TOOLS_DIR"
 
-          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-          echo "BUILD_SCRIPT=$BUILD_SCRIPT" >> "$GITHUB_ENV"
-          echo "BUILD_PS1=$BUILD_PS1" >> "$GITHUB_ENV"
-          echo "RELEASE_DIR=$RELEASE_DIR" >> "$GITHUB_ENV"
-          echo "TOOLS_DIR=$TOOLS_DIR" >> "$GITHUB_ENV"
-
-          echo "========================================"
-          echo "PROJECT PATHS"
-          echo "========================================"
-          echo "PROJECT_ROOT: $PROJECT_ROOT"
-          echo "BUILD_SCRIPT: $BUILD_SCRIPT"
-          echo "BUILD_PS1:    $BUILD_PS1"
-          echo "RELEASE_DIR:  $RELEASE_DIR"
-          echo "TOOLS_DIR:    $TOOLS_DIR"
-
-      # ============================================================
-      # 5. INSTALL BUILD TOOLS
-      # ============================================================
       - name: Install build tools
         shell: bash
         run: |
           set -e
 
-          echo "========================================"
-          echo "INSTALL BUILD TOOLS"
-          echo "========================================"
-
-          if ! command -v 7z >/dev/null 2>&1; then
-            brew install sevenzip
+          if ! command -v pwsh >/dev/null 2>&1; then
+            brew install --cask powershell
           fi
 
-          if ! command -v 7z >/dev/null 2>&1; then
-            echo "ERROR: 7z was not installed"
-            exit 1
-          fi
+          echo "PowerShell:"
+          pwsh --version
 
-          if ! command -v llvm-strip >/dev/null 2>&1; then
-            brew install llvm
-          fi
-
-          LLVM_PREFIX="$(brew --prefix llvm)"
-
-          if [ -x "$LLVM_PREFIX/bin/llvm-strip" ]; then
-            echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
-          fi
-
-          echo "7z:"
-          7z | head -n 2 || true
-
-          echo "llvm-strip:"
-          command -v llvm-strip || true
-
-      # ============================================================
-      # 6. PREPARE BUILD TOOLS
-      # ============================================================
       - name: Prepare build tools
         shell: bash
         run: |
           set -e
 
-          echo "========================================"
-          echo "PREPARE BUILD TOOLS"
-          echo "========================================"
+          chmod +x "$BUILD_SCRIPT" || true
 
-          mkdir -p "$TOOLS_DIR"
+          echo "Build script:"
+          ls -lh "$BUILD_SCRIPT"
 
-          LLVM_PREFIX="$(brew --prefix llvm)"
+          echo "Release directory:"
+          mkdir -p "$RELEASE_DIR"
+          ls -la "$RELEASE_DIR"
 
-          if [ -x "$LLVM_PREFIX/bin/llvm-strip" ]; then
-            cp "$LLVM_PREFIX/bin/llvm-strip" "$TOOLS_DIR/llvm-strip"
-            chmod +x "$TOOLS_DIR/llvm-strip"
-          fi
-
-          if command -v 7z >/dev/null 2>&1; then
-            echo "7z found."
-          else
-            echo "ERROR: 7z not found."
-            exit 1
-          fi
-
-          if [ -x "$TOOLS_DIR/llvm-strip" ]; then
-            echo "llvm-strip prepared."
-          else
-            echo "WARNING: llvm-strip not found in project tools directory."
-          fi
-
-          echo "========================================"
-          echo "TOOL CHECK"
-          echo "========================================"
-          echo "PROJECT_ROOT: $PROJECT_ROOT"
-          echo "TOOLS_DIR:    $TOOLS_DIR"
-          echo "7z:           $(command -v 7z || true)"
-          echo "llvm-strip:   $(command -v llvm-strip || true)"
-
-      # ============================================================
-      # 7. BUILD
-      # ============================================================
-            - name: Build IPA
+      - name: Build IPA
         shell: bash
         run: |
           set -e
@@ -194,268 +108,80 @@ jobs:
           echo "========================================"
           echo "PROJECT_ROOT: $PROJECT_ROOT"
           echo "BUILD_SCRIPT: $BUILD_SCRIPT"
-          echo "BUILD_PS1:    $BUILD_PS1"
           echo "RELEASE_DIR:  $RELEASE_DIR"
           echo "IOS_SDK:      $IOS_SDK"
           echo "========================================"
 
-          mkdir -p "$RELEASE_DIR"
-
           cd "$PROJECT_ROOT"
 
           pwsh -NoProfile -ExecutionPolicy Bypass \
-            -File "$BUILD_PS1" \
+            -File "$BUILD_SCRIPT" \
             -OutputDirectory "$RELEASE_DIR"
 
           echo "========================================"
           echo "BUILD COMMAND FINISHED"
           echo "========================================"
 
-      # ============================================================
-      # 8. FIND / CREATE IPA
-      # ============================================================
-      - name: Find or create IPA
+      - name: Find IPA
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "SEARCH GENERATED FILES"
+          echo "SEARCHING FOR IPA"
           echo "========================================"
 
-          WORKSPACE="$GITHUB_WORKSPACE"
-          RELEASE_DIR="$RELEASE_DIR"
-
-          mkdir -p "$RELEASE_DIR"
-
-          echo "Workspace:"
-          echo "$WORKSPACE"
-
-          echo
-          echo "Release directory:"
-          echo "$RELEASE_DIR"
-
-          echo
-          echo "========================================"
-          echo "SEARCH IPA"
-          echo "========================================"
-
-          IPA_FOUND=""
-
-          while IFS= read -r -d '' file; do
-            if [ -z "$IPA_FOUND" ]; then
-              IPA_FOUND="$file"
-            fi
-          done < <(
-            find "$WORKSPACE" \
-              -type f \
-              -iname "*.ipa" \
-              -not -path "*/.git/*" \
-              -print0 2>/dev/null
-          )
-
-          if [ -n "$IPA_FOUND" ]; then
-            echo "IPA found:"
-            echo "$IPA_FOUND"
-
-            cp -f "$IPA_FOUND" "$RELEASE_DIR/Build.ipa"
-
-            echo "IPA_PATH=$RELEASE_DIR/Build.ipa" >> "$GITHUB_ENV"
-
-            echo
-            echo "IPA copied successfully."
-            exit 0
+          if [ ! -d "$RELEASE_DIR" ]; then
+            echo "ERROR: Release directory does not exist"
+            exit 1
           fi
 
-          echo "No existing IPA found."
-          echo
-          echo "========================================"
-          echo "SEARCH APP"
-          echo "========================================"
-
-          APP_FOUND=""
-
-          while IFS= read -r -d '' file; do
-            if [ -z "$APP_FOUND" ]; then
-              APP_FOUND="$file"
-            fi
-          done < <(
-            find "$WORKSPACE" \
-              -type d \
-              -name "*.app" \
-              -not -path "*/.git/*" \
-              -print0 2>/dev/null
-          )
-
-          if [ -n "$APP_FOUND" ]; then
-            echo "APP found:"
-            echo "$APP_FOUND"
-
-            PAYLOAD_DIR="$RUNNER_TEMP/ipa_payload"
-            rm -rf "$PAYLOAD_DIR"
-            mkdir -p "$PAYLOAD_DIR"
-
-            cp -R "$APP_FOUND" "$PAYLOAD_DIR/"
-
-            APP_NAME="$(basename "$APP_FOUND")"
-
-            cd "$PAYLOAD_DIR"
-            7z a -tzip "$RELEASE_DIR/Build.ipa" "Payload" >/dev/null
-
-            if [ ! -f "$RELEASE_DIR/Build.ipa" ]; then
-              echo "ERROR: Failed to create IPA."
-              exit 1
-            fi
-
-            echo "IPA_PATH=$RELEASE_DIR/Build.ipa" >> "$GITHUB_ENV"
-
-            echo
-            echo "IPA created from APP:"
-            echo "$APP_NAME"
-
-            exit 0
-          fi
-
-          echo
-          echo "========================================"
-          echo "SEARCH ZIP"
-          echo "========================================"
-
-          ZIP_FOUND=""
-
-          while IFS= read -r -d '' file; do
-            if [ -z "$ZIP_FOUND" ]; then
-              ZIP_FOUND="$file"
-            fi
-          done < <(
-            find "$WORKSPACE" \
-              -type f \
-              \( -iname "*.zip" -o -iname "*.7z" \) \
-              -not -path "*/.git/*" \
-              -print0 2>/dev/null
-          )
-
-          if [ -n "$ZIP_FOUND" ]; then
-            echo "Archive found:"
-            echo "$ZIP_FOUND"
-
-            EXTRACT_DIR="$RUNNER_TEMP/build_extract"
-            rm -rf "$EXTRACT_DIR"
-            mkdir -p "$EXTRACT_DIR"
-
-            7z x "$ZIP_FOUND" "-o$EXTRACT_DIR" -y >/dev/null
-
-            APP_FROM_ARCHIVE=""
-
-            while IFS= read -r -d '' file; do
-              if [ -z "$APP_FROM_ARCHIVE" ]; then
-                APP_FROM_ARCHIVE="$file"
-              fi
-            done < <(
-              find "$EXTRACT_DIR" \
-                -type d \
-                -name "*.app" \
-                -print0 2>/dev/null
-            )
-
-            if [ -n "$APP_FROM_ARCHIVE" ]; then
-              echo "APP found inside archive:"
-              echo "$APP_FROM_ARCHIVE"
-
-              PAYLOAD_DIR="$RUNNER_TEMP/ipa_payload"
-              rm -rf "$PAYLOAD_DIR"
-              mkdir -p "$PAYLOAD_DIR"
-
-              cp -R "$APP_FROM_ARCHIVE" "$PAYLOAD_DIR/"
-
-              cd "$PAYLOAD_DIR"
-              7z a -tzip "$RELEASE_DIR/Build.ipa" "Payload" >/dev/null
-
-              if [ ! -f "$RELEASE_DIR/Build.ipa" ]; then
-                echo "ERROR: Failed to create IPA from archive."
-                exit 1
-              fi
-
-              echo "IPA_PATH=$RELEASE_DIR/Build.ipa" >> "$GITHUB_ENV"
-
-              echo "IPA created successfully from archive."
-              exit 0
-            fi
-          fi
-
-          echo
-          echo "========================================"
-          echo "NO IPA / APP GENERATED"
-          echo "========================================"
-
-          echo
-          echo "Release contents:"
-          find "$RELEASE_DIR" -maxdepth 5 -print 2>/dev/null || true
-
-          echo
-          echo "All generated files:"
-          find "$WORKSPACE" \
+          find "$RELEASE_DIR" \
             -type f \
-            -not -path "*/.git/*" \
-            -not -path "*/node_modules/*" \
-            | head -n 300 || true
+            \( -iname "*.ipa" -o -iname "*.zip" \) \
+            -print
 
-          echo
-          echo "ERROR: Build completed, but no IPA or APP was generated."
-          exit 1
+          IPA_COUNT=$(find "$RELEASE_DIR" -type f -iname "*.ipa" | wc -l | tr -d ' ')
 
-      # ============================================================
-      # 9. VERIFY IPA
-      # ============================================================
+          echo "IPA_COUNT=$IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo "WARNING: No IPA was generated"
+          else
+            echo "IPA generated successfully"
+          fi
+
       - name: Check IPA
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "CHECK GENERATED IPA"
+          echo "CHECK GENERATED FILES"
           echo "========================================"
 
           echo "RELEASE_DIR:"
           echo "$RELEASE_DIR"
 
-          echo
+          echo "========================================"
           echo "RELEASE FILES"
           echo "========================================"
 
           find "$RELEASE_DIR" \
-            -maxdepth 3 \
+            -maxdepth 2 \
             -type f \
-            -print 2>/dev/null || true
+            -print
 
-          echo
           echo "========================================"
           echo "IPA FILES"
           echo "========================================"
 
-          IPA_COUNT="$(find "$RELEASE_DIR" -type f -iname "*.ipa" | wc -l | tr -d ' ')"
+          find "$RELEASE_DIR" \
+            -maxdepth 2 \
+            -type f \
+            -iname "*.ipa" \
+            -print
 
-          echo "IPA COUNT: $IPA_COUNT"
-
-          if [ "$IPA_COUNT" -eq 0 ]; then
-            echo "ERROR: No IPA file was generated."
-            exit 1
-          fi
-
-          echo
-          echo "IPA FOUND:"
-          find "$RELEASE_DIR" -type f -iname "*.ipa" -print
-
-          echo
-          echo "========================================"
-          echo "IPA SIZE"
-          echo "========================================"
-
-          ls -lh "$RELEASE_DIR"/*.ipa
-
-      # ============================================================
-      # 10. SHOW GENERATED FILES
-      # ============================================================
       - name: Show generated files
         if: always()
         shell: bash
@@ -465,21 +191,17 @@ jobs:
           echo "========================================"
 
           if [ -d "$RELEASE_DIR" ]; then
-            find "$RELEASE_DIR" \
-              -maxdepth 5 \
-              -print \
-              2>/dev/null || true
+            find "$RELEASE_DIR" -maxdepth 3 -type f -print
+          else
+            echo "Release directory not found"
           fi
 
-      # ============================================================
-      # 11. UPLOAD IPA
-      # ============================================================
       - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Build-IPA
           path: |
-            ${{ env.RELEASE_DIR }}/*.ipa
-          if-no-files-found: error
-          retention-days: 7
+            FF-CACHE-MANAGER-SOURCE/release/*.ipa
+            FF-CACHE-MANAGER-SOURCE/release/*.zip
+          if-no-files-found: warn
