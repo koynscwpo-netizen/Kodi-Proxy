@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$BrandOwner = "@FAKHERDDIN5"
-$BrandChannel = "https://t.me/+yzTUmx4f-ck5N2M0"
+$BrandOwner = "@KODIBATIB6"
+$BrandChannel = "https://t.me/k0dibabi"
 $MainSourceForBrandCheck = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "main.m"
 $MainBrandText = Get-Content -LiteralPath $MainSourceForBrandCheck -Raw
 if (-not $MainBrandText.Contains($BrandOwner) -or -not $MainBrandText.Contains($BrandChannel)) {
