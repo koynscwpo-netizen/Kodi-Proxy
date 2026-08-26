@@ -84,10 +84,36 @@ jobs:
           echo "PowerShell:"
           pwsh --version
 
-      - name: Prepare build tools
+            - name: Prepare build tools
         shell: bash
         run: |
           set -e
+
+          echo "========================================"
+          echo "PREPARE BUILD TOOLS"
+          echo "========================================"
+
+          CLANG_PATH="$(xcrun --find clang)"
+
+          if [ ! -x "$CLANG_PATH" ]; then
+            echo "ERROR: clang was not found"
+            exit 1
+          fi
+
+          echo "clang found:"
+          echo "$CLANG_PATH"
+
+          mkdir -p "$HOME/bin"
+
+          ln -sf "$CLANG_PATH" "$HOME/bin/clang.exe"
+
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+          export PATH="$HOME/bin:$PATH"
+
+          echo "Checking clang.exe..."
+          command -v clang.exe
+          clang.exe --version
 
           chmod +x "$BUILD_SCRIPT" || true
 
@@ -97,7 +123,6 @@ jobs:
           echo "Release directory:"
           mkdir -p "$RELEASE_DIR"
           ls -la "$RELEASE_DIR"
-
       - name: Build IPA
         shell: bash
         run: |
