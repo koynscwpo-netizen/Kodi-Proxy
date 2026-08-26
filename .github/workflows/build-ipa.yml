@@ -184,7 +184,7 @@ jobs:
       # ============================================================
       # 7. BUILD
       # ============================================================
-      - name: Build IPA
+            - name: Build IPA
         shell: bash
         run: |
           set -e
@@ -203,9 +203,8 @@ jobs:
 
           cd "$PROJECT_ROOT"
 
-          pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-            -File "$BUILD_SCRIPT" \
-            -Offline \
+          pwsh -NoProfile -ExecutionPolicy Bypass \
+            -File "$BUILD_PS1" \
             -OutputDirectory "$RELEASE_DIR"
 
           echo "========================================"
