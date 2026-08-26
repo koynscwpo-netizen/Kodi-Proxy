@@ -1,4 +1,3 @@
-```yaml
 name: Build IPA
 
 on:
@@ -10,7 +9,7 @@ jobs:
 
     steps:
       # ============================================================
-      # 1. CHECKOUT
+      # 1. CHECKOUT SOURCE
       # ============================================================
       - name: Checkout source
         uses: actions/checkout@v4
@@ -45,86 +44,54 @@ jobs:
           echo "IOS_SDK=$SDK" >> "$GITHUB_ENV"
 
           echo "======================================"
-          echo "iPhoneOS SDK"
+          echo "IPHONEOS SDK"
           echo "======================================"
 
           echo "$SDK"
 
           test -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
 
-          echo "UIKit/UIKit.h found successfully."
+          echo "iPhoneOS SDK found."
 
       # ============================================================
-      # 4. FIND PROJECT ROOT
+      # 4. SET PROJECT PATHS
       # ============================================================
-      - name: Find project root
-  shell: bash
-  run: |
-    set -e
+      - name: Set project paths
+        shell: bash
+        run: |
+          set -e
 
-    PROJECT_ROOT="$GITHUB_WORKSPACE/FF-CACHE-MANAGER-SOURCE"
-    BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
-    BUILD_WINDOWS="$PROJECT_ROOT/BUILD-WINDOWS.ps1"
+          PROJECT_ROOT="$GITHUB_WORKSPACE/FF-CACHE-MANAGER-SOURCE"
+          APP_ROOT="$PROJECT_ROOT/app/ff_manager"
+          BUILD_PS1="$APP_ROOT/build.ps1"
+          RELEASE_DIR="$PROJECT_ROOT/release"
 
-    echo "PROJECT_ROOT=$PROJECT_ROOT"
-    echo "BUILD_WINDOWS=$BUILD_WINDOWS"
-    echo "BUILD_PS1=$BUILD_PS1"
-
-    test -f "$BUILD_WINDOWS"
-    test -f "$BUILD_PS1"
-
-    echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-    echo "BUILD_WINDOWS=$BUILD_WINDOWS" >> "$GITHUB_ENV"
-    echo "BUILD_PS1=$BUILD_PS1" >> "$GITHUB_ENV"
-    echo "RELEASE_DIR=$PROJECT_ROOT/release" >> "$GITHUB_ENV"
-
-    echo "BUILD-WINDOWS.ps1 FOUND"
-    echo "build.ps1 FOUND"
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "APP_ROOT=$APP_ROOT" >> "$GITHUB_ENV"
+          echo "BUILD_PS1=$BUILD_PS1" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$RELEASE_DIR" >> "$GITHUB_ENV"
 
           echo "======================================"
-          echo "SEARCH BUILD-WINDOWS.ps1"
+          echo "PROJECT"
           echo "======================================"
 
-          SCRIPT="$(find . -type f -name 'BUILD-WINDOWS.ps1' -print -quit)"
-
-          if [ -z "$SCRIPT" ]; then
-            echo "BUILD-WINDOWS.ps1 was not found."
-            exit 1
-          fi
-
-          SCRIPT="${SCRIPT#./}"
-
-          PROJECT_ROOT="$(dirname "$SCRIPT")"
-
-          echo "BUILD SCRIPT:"
-          echo "$SCRIPT"
-
-          echo "PROJECT ROOT:"
+          echo "PROJECT_ROOT:"
           echo "$PROJECT_ROOT"
 
-          BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
+          echo "APP_ROOT:"
+          echo "$APP_ROOT"
 
-          if [ ! -f "$BUILD_PS1" ]; then
-            echo "build.ps1 was not found:"
-            echo "$BUILD_PS1"
-            exit 1
-          fi
+          echo "BUILD_PS1:"
+          echo "$BUILD_PS1"
 
-          echo "BUILD_SCRIPT=$GITHUB_WORKSPACE/$SCRIPT" >> "$GITHUB_ENV"
-          echo "PROJECT_ROOT=$GITHUB_WORKSPACE/$PROJECT_ROOT" >> "$GITHUB_ENV"
-          echo "RELEASE_DIR=$GITHUB_WORKSPACE/$PROJECT_ROOT/release" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR:"
+          echo "$RELEASE_DIR"
 
-          echo "======================================"
-          echo "BUILD SCRIPT FOUND"
-          echo "======================================"
+          test -d "$PROJECT_ROOT"
+          test -d "$APP_ROOT"
+          test -f "$BUILD_PS1"
 
-          echo "$GITHUB_WORKSPACE/$SCRIPT"
-
-          echo "======================================"
-          echo "BUILD.PS1 FOUND"
-          echo "======================================"
-
-          echo "$GITHUB_WORKSPACE/$BUILD_PS1"
+          echo "Project paths OK."
 
       # ============================================================
       # 5. INSTALL BUILD TOOLS
@@ -137,17 +104,9 @@ jobs:
           brew update
           brew install llvm sevenzip
 
-      # ============================================================
-      # 6. PREPARE TOOL NAMES
-      # ============================================================
-      - name: Prepare tool names for build.ps1
-        shell: bash
-        run: |
-          set -e
-
-          TOOLS="$PROJECT_ROOT/app/ff_manager/.tools"
-
-          mkdir -p "$TOOLS"
+          echo "======================================"
+          echo "BUILD TOOLS"
+          echo "======================================"
 
           LLVM="$(brew --prefix llvm)/bin"
 
@@ -157,10 +116,6 @@ jobs:
           LIPO="$(xcrun --find lipo)"
           INSTALL_NAME="$(xcrun --find install_name_tool)"
           SEVENZIP="$(command -v 7zz)"
-
-          echo "======================================"
-          echo "CHECK BUILD TOOLS"
-          echo "======================================"
 
           test -f "$CLANG"
           test -f "$STRIP"
@@ -175,6 +130,28 @@ jobs:
           echo "lipo: $LIPO"
           echo "install_name_tool: $INSTALL_NAME"
           echo "7z: $SEVENZIP"
+
+          echo "LLVM_BIN=$LLVM" >> "$GITHUB_ENV"
+          echo "CLANG=$CLANG" >> "$GITHUB_ENV"
+          echo "STRIP=$STRIP" >> "$GITHUB_ENV"
+          echo "LD=$LD" >> "$GITHUB_ENV"
+          echo "LIPO=$LIPO" >> "$GITHUB_ENV"
+          echo "INSTALL_NAME=$INSTALL_NAME" >> "$GITHUB_ENV"
+          echo "SEVENZIP=$SEVENZIP" >> "$GITHUB_ENV"
+
+          echo "Build tools found."
+
+      # ============================================================
+      # 6. PREPARE TOOLS FOR build.ps1
+      # ============================================================
+      - name: Prepare build tools
+        shell: bash
+        run: |
+          set -e
+
+          TOOLS="$APP_ROOT/.tools"
+
+          mkdir -p "$TOOLS"
 
           ln -sf "$CLANG" \
             "$TOOLS/clang.exe"
@@ -199,20 +176,6 @@ jobs:
           echo "$TOOLS" >> "$GITHUB_PATH"
 
           echo "======================================"
-          echo "LLVM STRIP VERSION"
-          echo "======================================"
-
-          "$STRIP" --version
-
-          echo "======================================"
-          echo "7-ZIP CHECK"
-          echo "======================================"
-
-          "$TOOLS/7z.exe" --help >/dev/null
-
-          echo "7z.exe is working."
-
-          echo "======================================"
           echo "TOOLS READY"
           echo "======================================"
 
@@ -230,10 +193,20 @@ jobs:
           echo "START BUILD"
           echo "======================================"
 
-          cd "$PROJECT_ROOT"
+          echo "Build script:"
+          echo "$BUILD_PS1"
+
+          echo "SDK:"
+          echo "$IOS_SDK"
+
+          echo "Output:"
+          echo "$RELEASE_DIR"
+
+          mkdir -p "$RELEASE_DIR"
 
           pwsh -NoProfile -ExecutionPolicy Bypass \
-            -File "$BUILD_SCRIPT" \
+            -File "$BUILD_PS1" \
+            -Offline \
             -OutputDirectory "$RELEASE_DIR"
 
           echo "======================================"
@@ -252,22 +225,22 @@ jobs:
           echo "RELEASE FILES"
           echo "======================================"
 
-          mkdir -p "$RELEASE_DIR"
-
           find "$RELEASE_DIR" \
-            -maxdepth 1 \
+            -maxdepth 2 \
             -type f \
-            -print || true
+            -print
 
           echo "======================================"
           echo "IPA FILES"
           echo "======================================"
 
-          IPA_COUNT="$(find "$RELEASE_DIR" \
-            -type f \
-            -name "*.ipa" \
-            | wc -l \
-            | tr -d ' ')"
+          IPA_COUNT="$(
+            find "$RELEASE_DIR" \
+              -type f \
+              -name "*.ipa" \
+              | wc -l \
+              | tr -d ' '
+          )"
 
           echo "IPA COUNT: $IPA_COUNT"
 
@@ -287,4 +260,3 @@ jobs:
           name: FF-Cache-Manager-IPA
           path: ${{ env.RELEASE_DIR }}/*.ipa
           if-no-files-found: error
-```
