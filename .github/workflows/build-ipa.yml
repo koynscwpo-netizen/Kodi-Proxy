@@ -200,6 +200,66 @@ jobs:
           echo "======================================"
 
           ls -la "$TOOLS"
+                # ============================================================
+      # 7. BUILD IPA
+      # ============================================================
+      - name: Build IPA
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "START BUILD"
+          echo "======================================"
+
+          cd "$PROJECT_ROOT"
+
+          pwsh -NoProfile -ExecutionPolicy Bypass \
+            -File "$BUILD_SCRIPT" \
+            -OutputDirectory "$RELEASE_DIR"
+
+          echo "======================================"
+          echo "BUILD FINISHED"
+          echo "======================================"
+
+      # ============================================================
+      # 8. CHECK IPA
+      # ============================================================
+      - name: Check IPA
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "RELEASE FILES"
+          echo "======================================"
+
+          mkdir -p "$RELEASE_DIR"
+
+          find "$RELEASE_DIR" -type f -maxdepth 1 -print || true
+
+          echo "======================================"
+          echo "IPA FILES"
+          echo "======================================"
+
+          IPA_COUNT="$(find "$RELEASE_DIR" -type f -name "*.ipa" | wc -l | tr -d ' ')"
+
+          echo "IPA COUNT: $IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo "No IPA file was generated."
+            exit 1
+          fi
+
+      # ============================================================
+      # 9. UPLOAD IPA
+      # ============================================================
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FF-Cache-Manager-IPA
+          path: ${{ env.RELEASE_DIR }}/*.ipa
+          if-no-files-found: error
 
       # ============================================================
       # 7. PYTHON + LIEF + PILLOW
