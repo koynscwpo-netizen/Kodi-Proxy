@@ -1,0 +1,32 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Show project structure
+        run: |
+          echo "=== Source ==="
+          find . -maxdepth 4 -type f | sort | head -300
+
+      - name: Find Xcode project
+        run: |
+          echo "=== Xcode projects ==="
+          find . -type d \( -name "*.xcodeproj" -o -name "*.xcworkspace" \) -print
+
+      - name: Find IPA
+        run: |
+          echo "=== Existing IPA files ==="
+          find . -type f -name "*.ipa" -print
+
+      - name: Find build scripts
+        run: |
+          echo "=== Build scripts ==="
+          find . -type f \( -name "*.sh" -o -name "*.py" -o -name "*.ps1" \) -print | head -200
