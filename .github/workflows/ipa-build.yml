@@ -58,9 +58,28 @@ jobs:
       # 4. FIND PROJECT ROOT
       # ============================================================
       - name: Find project root
-        shell: bash
-        run: |
-          set -e
+  shell: bash
+  run: |
+    set -e
+
+    PROJECT_ROOT="$GITHUB_WORKSPACE/FF-CACHE-MANAGER-SOURCE"
+    BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
+    BUILD_WINDOWS="$PROJECT_ROOT/BUILD-WINDOWS.ps1"
+
+    echo "PROJECT_ROOT=$PROJECT_ROOT"
+    echo "BUILD_WINDOWS=$BUILD_WINDOWS"
+    echo "BUILD_PS1=$BUILD_PS1"
+
+    test -f "$BUILD_WINDOWS"
+    test -f "$BUILD_PS1"
+
+    echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+    echo "BUILD_WINDOWS=$BUILD_WINDOWS" >> "$GITHUB_ENV"
+    echo "BUILD_PS1=$BUILD_PS1" >> "$GITHUB_ENV"
+    echo "RELEASE_DIR=$PROJECT_ROOT/release" >> "$GITHUB_ENV"
+
+    echo "BUILD-WINDOWS.ps1 FOUND"
+    echo "build.ps1 FOUND"
 
           echo "======================================"
           echo "SEARCH BUILD-WINDOWS.ps1"
