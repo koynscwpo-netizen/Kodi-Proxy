@@ -1,0 +1,501 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # 2. SELECT XCODE
+      # ============================================================
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -e
+
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+          echo "======================================"
+          echo "XCODE"
+          echo "======================================"
+
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      # ============================================================
+      # 3. GET IPHONEOS SDK
+      # ============================================================
+      - name: Get iPhoneOS SDK
+        shell: bash
+        run: |
+          set -e
+
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+
+          echo "IOS_SDK=$SDK" >> "$GITHUB_ENV"
+
+          echo "======================================"
+          echo "iPhoneOS SDK"
+          echo "======================================"
+          echo "$SDK"
+
+          test -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+
+          echo "UIKit/UIKit.h found successfully."
+
+      # ============================================================
+      # 4. FIND PROJECT ROOT
+      # ============================================================
+      - name: Find project root
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "SEARCH BUILD-WINDOWS.ps1"
+          echo "======================================"
+
+          SCRIPT="$(find . -type f -name 'BUILD-WINDOWS.ps1' -print -quit)"
+
+          if [ -z "$SCRIPT" ]; then
+            echo "BUILD-WINDOWS.ps1 was not found."
+            exit 1
+          fi
+
+          SCRIPT="${SCRIPT#./}"
+
+          PROJECT_ROOT="$(dirname "$SCRIPT")"
+
+          echo "BUILD SCRIPT:"
+          echo "$SCRIPT"
+
+          echo "PROJECT ROOT:"
+          echo "$PROJECT_ROOT"
+
+          BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
+
+          if [ ! -f "$BUILD_PS1" ]; then
+            echo "build.ps1 was not found:"
+            echo "$BUILD_PS1"
+            exit 1
+          fi
+
+          echo "BUILD_SCRIPT=$GITHUB_WORKSPACE/$SCRIPT" >> "$GITHUB_ENV"
+          echo "PROJECT_ROOT=$GITHUB_WORKSPACE/$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$GITHUB_WORKSPACE/$PROJECT_ROOT/release" >> "$GITHUB_ENV"
+
+          echo "======================================"
+          echo "BUILD SCRIPT FOUND"
+          echo "======================================"
+
+          echo "$GITHUB_WORKSPACE/$SCRIPT"
+
+          echo "======================================"
+          echo "BUILD.PS1 FOUND"
+          echo "======================================"
+
+          echo "$GITHUB_WORKSPACE/$BUILD_PS1"
+
+      # ============================================================
+      # 5. INSTALL BUILD TOOLS
+      # ============================================================
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -e
+
+          brew update
+          brew install llvm sevenzip
+
+      # ============================================================
+      # 6. PREPARE TOOL NAMES
+      # ============================================================
+      - name: Prepare tool names for build.ps1
+        shell: bash
+        run: |
+          set -e
+
+          TOOLS="$PROJECT_ROOT/app/ff_manager/.tools"
+
+          mkdir -p "$TOOLS"
+
+          LLVM="$(brew --prefix llvm)/bin"
+
+          CLANG="$LLVM/clang"
+          STRIP="$LLVM/llvm-strip"
+          LD="$(xcrun --find ld)"
+          LIPO="$(xcrun --find lipo)"
+          INSTALL_NAME="$(xcrun --find install_name_tool)"
+          SEVENZIP="$(command -v 7zz)"
+
+          echo "======================================"
+          echo "CHECK BUILD TOOLS"
+          echo "======================================"
+
+          test -f "$CLANG"
+          test -f "$STRIP"
+          test -f "$LD"
+          test -f "$LIPO"
+          test -f "$INSTALL_NAME"
+          test -f "$SEVENZIP"
+
+          echo "clang: $CLANG"
+          echo "llvm-strip: $STRIP"
+          echo "ld: $LD"
+          echo "lipo: $LIPO"
+          echo "install_name_tool: $INSTALL_NAME"
+          echo "7z: $SEVENZIP"
+
+          # --------------------------------------------------------
+          # Create the Windows-style tool names expected by build.ps1
+          # --------------------------------------------------------
+
+          ln -sf "$CLANG" \
+            "$TOOLS/clang.exe"
+
+          ln -sf "$STRIP" \
+            "$TOOLS/llvm-strip.exe"
+
+          ln -sf "$LD" \
+            "$TOOLS/ld64.lld.exe"
+
+          ln -sf "$LIPO" \
+            "$TOOLS/llvm-lipo.exe"
+
+          ln -sf "$INSTALL_NAME" \
+            "$TOOLS/llvm-install-name-tool.exe"
+
+          ln -sf "$SEVENZIP" \
+            "$TOOLS/7z.exe"
+
+          chmod +x "$TOOLS"/*
+
+          echo "$TOOLS" >> "$GITHUB_PATH"
+
+          echo "======================================"
+          echo "LLVM STRIP VERSION"
+          echo "======================================"
+
+          "$STRIP" --version
+
+          echo "======================================"
+          echo "7-ZIP CHECK"
+          echo "======================================"
+
+          "$TOOLS/7z.exe" --help >/dev/null
+
+          echo "7z.exe is working."
+
+          echo "======================================"
+          echo "TOOLS READY"
+          echo "======================================"
+
+          ls -la "$TOOLS"
+
+      # ============================================================
+      # 7. PYTHON + LIEF + PILLOW
+      # ============================================================
+      - name: Install Python dependency
+        shell: bash
+        run: |
+          set -e
+
+          python3 -m venv "$GITHUB_WORKSPACE/.venv"
+
+          . "$GITHUB_WORKSPACE/.venv/bin/activate"
+
+          echo "======================================"
+          echo "INSTALL PYTHON DEPENDENCIES"
+          echo "======================================"
+
+          python -m pip install --upgrade pip
+
+          # LIEF = binary manipulation used by the project
+          # Pillow = provides the PIL module used by icon generation
+          python -m pip install lief Pillow
+
+          echo "======================================"
+          echo "PYTHON"
+          echo "======================================"
+
+          python --version
+
+          echo "======================================"
+          echo "LIEF"
+          echo "======================================"
+
+          python -c "import lief; print('LIEF:', lief.__version__)"
+
+          echo "======================================"
+          echo "PILLOW / PIL"
+          echo "======================================"
+
+          python -c "from PIL import Image, ImageDraw; import PIL; print('Pillow:', PIL.__version__); print('PIL import OK')"
+
+          echo "======================================"
+          echo "PYTHON DEPENDENCIES READY"
+          echo "======================================"
+
+      # ============================================================
+      # 8. VERIFY PROJECT
+      # ============================================================
+      - name: Verify project
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "PROJECT"
+          echo "======================================"
+
+          echo "PROJECT_ROOT:"
+          echo "$PROJECT_ROOT"
+
+          echo "BUILD_SCRIPT:"
+          echo "$BUILD_SCRIPT"
+
+          echo "RELEASE_DIR:"
+          echo "$RELEASE_DIR"
+
+          test -f "$BUILD_SCRIPT"
+          test -f "$PROJECT_ROOT/app/ff_manager/build.ps1"
+
+          echo "BUILD-WINDOWS.ps1 found."
+          echo "build.ps1 found."
+
+          echo "======================================"
+          echo "PYTHON CHECK"
+          echo "======================================"
+
+          test -x "$GITHUB_WORKSPACE/.venv/bin/python"
+
+          "$GITHUB_WORKSPACE/.venv/bin/python" \
+            -c "from PIL import Image, ImageDraw; import lief; print('Python dependencies OK')"
+
+          echo "Python dependencies verified."
+
+          echo "======================================"
+          echo "7-ZIP PATH CHECK"
+          echo "======================================"
+
+          echo "$PATH"
+
+          command -v 7z.exe
+
+          echo "7z.exe found in PATH."
+
+          echo "======================================"
+          echo "LLVM STRIP PATH CHECK"
+          echo "======================================"
+
+          command -v llvm-strip.exe
+
+          echo "llvm-strip.exe found in PATH."
+
+          echo "======================================"
+          echo "PROJECT CONTENTS"
+          echo "======================================"
+
+          ls -la "$PROJECT_ROOT"
+
+          echo "======================================"
+          echo "APP CONTENTS"
+          echo "======================================"
+
+          ls -la "$PROJECT_ROOT/app/ff_manager"
+
+          echo "======================================"
+          echo "TOOLS CONTENTS"
+          echo "======================================"
+
+          ls -la "$PROJECT_ROOT/app/ff_manager/.tools"
+
+      # ============================================================
+      # 9. BUILD IPA
+      # ============================================================
+      - name: Build unsigned IPA
+        shell: pwsh
+        env:
+          IOS_SDK: ${{ env.IOS_SDK }}
+          PROJECT_ROOT: ${{ env.PROJECT_ROOT }}
+          BUILD_SCRIPT: ${{ env.BUILD_SCRIPT }}
+          RELEASE_DIR: ${{ env.RELEASE_DIR }}
+          FF_TOOLS_ROOT: ${{ env.PROJECT_ROOT }}/app/ff_manager/.tools
+          PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "======================================"
+          Write-Host "FF Cache Manager IPA Build"
+          Write-Host "======================================"
+
+          Write-Host "PROJECT_ROOT:"
+          Write-Host $env:PROJECT_ROOT
+
+          Write-Host "BUILD_SCRIPT:"
+          Write-Host $env:BUILD_SCRIPT
+
+          Write-Host "IOS_SDK:"
+          Write-Host $env:IOS_SDK
+
+          Write-Host "FF_TOOLS_ROOT:"
+          Write-Host $env:FF_TOOLS_ROOT
+
+          Write-Host "PYTHON:"
+          Write-Host $env:PYTHON
+
+          # --------------------------------------------------------
+          # Verify SDK
+          # --------------------------------------------------------
+
+          $UIKitHeader = Join-Path `
+            $env:IOS_SDK `
+            "System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+
+          if (-not (Test-Path -LiteralPath $UIKitHeader)) {
+              throw "UIKit/UIKit.h was not found."
+          }
+
+          # --------------------------------------------------------
+          # Verify build scripts
+          # --------------------------------------------------------
+
+          if (-not (Test-Path -LiteralPath $env:BUILD_SCRIPT)) {
+              throw "BUILD-WINDOWS.ps1 was not found."
+          }
+
+          if (-not (Test-Path -LiteralPath "$env:PROJECT_ROOT/app/ff_manager/build.ps1")) {
+              throw "app/ff_manager/build.ps1 was not found."
+          }
+
+          # --------------------------------------------------------
+          # Verify Python
+          # --------------------------------------------------------
+
+          if (-not (Test-Path -LiteralPath $env:PYTHON)) {
+              throw "Python virtual environment was not found."
+          }
+
+          Write-Host "======================================"
+          Write-Host "VERIFY PYTHON MODULES"
+          Write-Host "======================================"
+
+          & $env:PYTHON -c "from PIL import Image, ImageDraw; import lief; print('PIL and LIEF OK')"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Python dependency verification failed."
+          }
+
+          # --------------------------------------------------------
+          # Verify tools
+          # --------------------------------------------------------
+
+          $ToolsDir = $env:FF_TOOLS_ROOT
+
+          if (-not (Test-Path -LiteralPath "$ToolsDir/llvm-strip.exe")) {
+              throw "llvm-strip.exe was not found."
+          }
+
+          if (-not (Test-Path -LiteralPath "$ToolsDir/7z.exe")) {
+              throw "7z.exe was not found."
+          }
+
+          Write-Host "======================================"
+          Write-Host "VERIFICATION PASSED"
+          Write-Host "======================================"
+
+          Write-Host "UIKit/UIKit.h found."
+          Write-Host "BUILD-WINDOWS.ps1 found."
+          Write-Host "build.ps1 found."
+          Write-Host "Python found."
+          Write-Host "PIL found."
+          Write-Host "LIEF found."
+          Write-Host "llvm-strip.exe found."
+          Write-Host "7z.exe found."
+
+          # --------------------------------------------------------
+          # Prepare release directory
+          # --------------------------------------------------------
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $env:RELEASE_DIR | Out-Null
+
+          # --------------------------------------------------------
+          # Build
+          # --------------------------------------------------------
+
+          Write-Host "======================================"
+          Write-Host "START BUILD"
+          Write-Host "======================================"
+
+          & $env:BUILD_SCRIPT `
+            -IosSdk "$env:IOS_SDK" `
+            -OutputDirectory "$env:RELEASE_DIR"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "IPA build failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host "======================================"
+          Write-Host "BUILD SCRIPT FINISHED"
+          Write-Host "======================================"
+
+      # ============================================================
+      # 10. SHOW GENERATED FILES
+      # ============================================================
+      - name: Show generated files
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "RELEASE FILES"
+          echo "======================================"
+
+          if [ ! -d "$RELEASE_DIR" ]; then
+            echo "Release directory was not created:"
+            echo "$RELEASE_DIR"
+            exit 1
+          fi
+
+          find "$RELEASE_DIR" -maxdepth 5 -type f -print
+
+          echo "======================================"
+          echo "IPA FILES"
+          echo "======================================"
+
+          IPA_COUNT="$(find "$RELEASE_DIR" -type f -name "*.ipa" | wc -l | tr -d ' ')"
+
+          echo "IPA COUNT: $IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo "No IPA file was generated."
+            exit 1
+          fi
+
+          find "$RELEASE_DIR" -type f -name "*.ipa" -print
+
+          echo "======================================"
+          echo "IPA FOUND"
+          echo "======================================"
+
+      # ============================================================
+      # 11. UPLOAD IPA ARTIFACT
+      # ============================================================
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FF-Cache-Manager-IPA
+          path: ${{ env.RELEASE_DIR }}/**/*.ipa
+          if-no-files-found: error
