@@ -1,3 +1,4 @@
+```yaml
 name: Build IPA
 
 on:
@@ -5,28 +6,266 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Show project structure
+      # ============================================================
+      # 2. SELECT XCODE
+      # ============================================================
+      - name: Select Xcode
+        shell: bash
         run: |
-          echo "=== Source ==="
-          find . -maxdepth 4 -type f | sort | head -300
+          set -e
 
-      - name: Find Xcode project
-        run: |
-          echo "=== Xcode projects ==="
-          find . -type d \( -name "*.xcodeproj" -o -name "*.xcworkspace" \) -print
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Find IPA
-        run: |
-          echo "=== Existing IPA files ==="
-          find . -type f -name "*.ipa" -print
+          echo "======================================"
+          echo "XCODE"
+          echo "======================================"
 
-      - name: Find build scripts
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      # ============================================================
+      # 3. GET IPHONEOS SDK
+      # ============================================================
+      - name: Get iPhoneOS SDK
+        shell: bash
         run: |
-          echo "=== Build scripts ==="
-          find . -type f \( -name "*.sh" -o -name "*.py" -o -name "*.ps1" \) -print | head -200
+          set -e
+
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+
+          echo "IOS_SDK=$SDK" >> "$GITHUB_ENV"
+
+          echo "======================================"
+          echo "iPhoneOS SDK"
+          echo "======================================"
+
+          echo "$SDK"
+
+          test -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+
+          echo "UIKit/UIKit.h found successfully."
+
+      # ============================================================
+      # 4. FIND PROJECT ROOT
+      # ============================================================
+      - name: Find project root
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "SEARCH BUILD-WINDOWS.ps1"
+          echo "======================================"
+
+          SCRIPT="$(find . -type f -name 'BUILD-WINDOWS.ps1' -print -quit)"
+
+          if [ -z "$SCRIPT" ]; then
+            echo "BUILD-WINDOWS.ps1 was not found."
+            exit 1
+          fi
+
+          SCRIPT="${SCRIPT#./}"
+
+          PROJECT_ROOT="$(dirname "$SCRIPT")"
+
+          echo "BUILD SCRIPT:"
+          echo "$SCRIPT"
+
+          echo "PROJECT ROOT:"
+          echo "$PROJECT_ROOT"
+
+          BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
+
+          if [ ! -f "$BUILD_PS1" ]; then
+            echo "build.ps1 was not found:"
+            echo "$BUILD_PS1"
+            exit 1
+          fi
+
+          echo "BUILD_SCRIPT=$GITHUB_WORKSPACE/$SCRIPT" >> "$GITHUB_ENV"
+          echo "PROJECT_ROOT=$GITHUB_WORKSPACE/$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$GITHUB_WORKSPACE/$PROJECT_ROOT/release" >> "$GITHUB_ENV"
+
+          echo "======================================"
+          echo "BUILD SCRIPT FOUND"
+          echo "======================================"
+
+          echo "$GITHUB_WORKSPACE/$SCRIPT"
+
+          echo "======================================"
+          echo "BUILD.PS1 FOUND"
+          echo "======================================"
+
+          echo "$GITHUB_WORKSPACE/$BUILD_PS1"
+
+      # ============================================================
+      # 5. INSTALL BUILD TOOLS
+      # ============================================================
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -e
+
+          brew update
+          brew install llvm sevenzip
+
+      # ============================================================
+      # 6. PREPARE TOOL NAMES
+      # ============================================================
+      - name: Prepare tool names for build.ps1
+        shell: bash
+        run: |
+          set -e
+
+          TOOLS="$PROJECT_ROOT/app/ff_manager/.tools"
+
+          mkdir -p "$TOOLS"
+
+          LLVM="$(brew --prefix llvm)/bin"
+
+          CLANG="$LLVM/clang"
+          STRIP="$LLVM/llvm-strip"
+          LD="$(xcrun --find ld)"
+          LIPO="$(xcrun --find lipo)"
+          INSTALL_NAME="$(xcrun --find install_name_tool)"
+          SEVENZIP="$(command -v 7zz)"
+
+          echo "======================================"
+          echo "CHECK BUILD TOOLS"
+          echo "======================================"
+
+          test -f "$CLANG"
+          test -f "$STRIP"
+          test -f "$LD"
+          test -f "$LIPO"
+          test -f "$INSTALL_NAME"
+          test -f "$SEVENZIP"
+
+          echo "clang: $CLANG"
+          echo "llvm-strip: $STRIP"
+          echo "ld: $LD"
+          echo "lipo: $LIPO"
+          echo "install_name_tool: $INSTALL_NAME"
+          echo "7z: $SEVENZIP"
+
+          ln -sf "$CLANG" \
+            "$TOOLS/clang.exe"
+
+          ln -sf "$STRIP" \
+            "$TOOLS/llvm-strip.exe"
+
+          ln -sf "$LD" \
+            "$TOOLS/ld64.lld.exe"
+
+          ln -sf "$LIPO" \
+            "$TOOLS/llvm-lipo.exe"
+
+          ln -sf "$INSTALL_NAME" \
+            "$TOOLS/llvm-install-name-tool.exe"
+
+          ln -sf "$SEVENZIP" \
+            "$TOOLS/7z.exe"
+
+          chmod +x "$TOOLS"/*
+
+          echo "$TOOLS" >> "$GITHUB_PATH"
+
+          echo "======================================"
+          echo "LLVM STRIP VERSION"
+          echo "======================================"
+
+          "$STRIP" --version
+
+          echo "======================================"
+          echo "7-ZIP CHECK"
+          echo "======================================"
+
+          "$TOOLS/7z.exe" --help >/dev/null
+
+          echo "7z.exe is working."
+
+          echo "======================================"
+          echo "TOOLS READY"
+          echo "======================================"
+
+          ls -la "$TOOLS"
+
+      # ============================================================
+      # 7. BUILD IPA
+      # ============================================================
+      - name: Build IPA
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "START BUILD"
+          echo "======================================"
+
+          cd "$PROJECT_ROOT"
+
+          pwsh -NoProfile -ExecutionPolicy Bypass \
+            -File "$BUILD_SCRIPT" \
+            -OutputDirectory "$RELEASE_DIR"
+
+          echo "======================================"
+          echo "BUILD FINISHED"
+          echo "======================================"
+
+      # ============================================================
+      # 8. CHECK IPA
+      # ============================================================
+      - name: Check IPA
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "RELEASE FILES"
+          echo "======================================"
+
+          mkdir -p "$RELEASE_DIR"
+
+          find "$RELEASE_DIR" \
+            -maxdepth 1 \
+            -type f \
+            -print || true
+
+          echo "======================================"
+          echo "IPA FILES"
+          echo "======================================"
+
+          IPA_COUNT="$(find "$RELEASE_DIR" \
+            -type f \
+            -name "*.ipa" \
+            | wc -l \
+            | tr -d ' ')"
+
+          echo "IPA COUNT: $IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo "No IPA file was generated."
+            exit 1
+          fi
+
+          echo "IPA generated successfully."
+
+      # ============================================================
+      # 9. UPLOAD IPA
+      # ============================================================
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FF-Cache-Manager-IPA
+          path: ${{ env.RELEASE_DIR }}/*.ipa
+          if-no-files-found: error
+```
