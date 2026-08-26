@@ -1,4 +1,4 @@
-name: Build IPA
+name: OLD - Build IPA
 
 on:
   workflow_dispatch:
