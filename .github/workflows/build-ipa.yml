@@ -8,6 +8,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
+
       # ============================================================
       # 1. CHECKOUT
       # ============================================================
@@ -41,19 +42,28 @@ jobs:
 
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 
+          if [ ! -d "$SDK" ]; then
+            echo "iPhoneOS SDK was not found:"
+            echo "$SDK"
+            exit 1
+          fi
+
           echo "IOS_SDK=$SDK" >> "$GITHUB_ENV"
 
           echo "======================================"
-          echo "iPhoneOS SDK"
+          echo "IPHONEOS SDK"
           echo "======================================"
           echo "$SDK"
 
-          test -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+          if [ ! -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h" ]; then
+            echo "UIKit/UIKit.h was not found."
+            exit 1
+          fi
 
-          echo "UIKit/UIKit.h found successfully."
+          echo "UIKit/UIKit.h found."
 
       # ============================================================
-      # 4. FIND PROJECT ROOT
+      # 4. FIND PROJECT
       # ============================================================
       - name: Find project root
         shell: bash
@@ -61,26 +71,20 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "SEARCH BUILD-WINDOWS.ps1"
+          echo "SEARCH PROJECT"
           echo "======================================"
 
-          SCRIPT="$(find . -type f -name 'BUILD-WINDOWS.ps1' -print -quit)"
+          SCRIPT="$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name 'BUILD-WINDOWS.ps1' \
+            -print -quit)"
 
           if [ -z "$SCRIPT" ]; then
             echo "BUILD-WINDOWS.ps1 was not found."
             exit 1
           fi
 
-          SCRIPT="${SCRIPT#./}"
-
           PROJECT_ROOT="$(dirname "$SCRIPT")"
-
-          echo "BUILD SCRIPT:"
-          echo "$SCRIPT"
-
-          echo "PROJECT ROOT:"
-          echo "$PROJECT_ROOT"
-
           BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
 
           if [ ! -f "$BUILD_PS1" ]; then
@@ -89,21 +93,23 @@ jobs:
             exit 1
           fi
 
-          echo "BUILD_SCRIPT=$GITHUB_WORKSPACE/$SCRIPT" >> "$GITHUB_ENV"
-          echo "PROJECT_ROOT=$GITHUB_WORKSPACE/$PROJECT_ROOT" >> "$GITHUB_ENV"
-          echo "RELEASE_DIR=$GITHUB_WORKSPACE/$PROJECT_ROOT/release" >> "$GITHUB_ENV"
+          RELEASE_DIR="$PROJECT_ROOT/release"
 
-          echo "======================================"
-          echo "BUILD SCRIPT FOUND"
-          echo "======================================"
+          echo "BUILD SCRIPT:"
+          echo "$SCRIPT"
 
-          echo "$GITHUB_WORKSPACE/$SCRIPT"
+          echo "PROJECT ROOT:"
+          echo "$PROJECT_ROOT"
 
-          echo "======================================"
-          echo "BUILD.PS1 FOUND"
-          echo "======================================"
+          echo "BUILD PS1:"
+          echo "$BUILD_PS1"
 
-          echo "$GITHUB_WORKSPACE/$BUILD_PS1"
+          echo "RELEASE DIR:"
+          echo "$RELEASE_DIR"
+
+          echo "BUILD_SCRIPT=$SCRIPT" >> "$GITHUB_ENV"
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$RELEASE_DIR" >> "$GITHUB_ENV"
 
       # ============================================================
       # 5. INSTALL BUILD TOOLS
@@ -113,13 +119,48 @@ jobs:
         run: |
           set -e
 
-          brew update
-          brew install llvm sevenzip
+          echo "======================================"
+          echo "INSTALL BUILD TOOLS"
+          echo "======================================"
+
+          brew install llvm sevenzip || true
+
+          echo "LLVM:"
+          brew --prefix llvm
+
+          echo "7-ZIP:"
+          command -v 7zz || true
 
       # ============================================================
-      # 6. PREPARE TOOL NAMES
+      # 6. INSTALL PYTHON DEPENDENCIES
       # ============================================================
-      - name: Prepare tool names for build.ps1
+      - name: Install Python dependency
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "PYTHON"
+          echo "======================================"
+
+          python3 -m venv "$GITHUB_WORKSPACE/.venv"
+
+          . "$GITHUB_WORKSPACE/.venv/bin/activate"
+
+          python -m pip install --upgrade pip
+          python -m pip install lief Pillow
+
+          python --version
+
+          python -c "import lief; print('LIEF:', lief.__version__)"
+          python -c "from PIL import Image, ImageDraw; import PIL; print('Pillow:', PIL.__version__)"
+
+          echo "PYTHON_OK=1" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # 7. PREPARE BUILD TOOLS
+      # ============================================================
+      - name: Prepare build tools
         shell: bash
         run: |
           set -e
@@ -132,13 +173,14 @@ jobs:
 
           CLANG="$LLVM/clang"
           STRIP="$LLVM/llvm-strip"
+
           LD="$(xcrun --find ld)"
           LIPO="$(xcrun --find lipo)"
           INSTALL_NAME="$(xcrun --find install_name_tool)"
           SEVENZIP="$(command -v 7zz)"
 
           echo "======================================"
-          echo "CHECK BUILD TOOLS"
+          echo "CHECK TOOLS"
           echo "======================================"
 
           test -f "$CLANG"
@@ -153,10 +195,10 @@ jobs:
           echo "ld: $LD"
           echo "lipo: $LIPO"
           echo "install_name_tool: $INSTALL_NAME"
-          echo "7z: $SEVENZIP"
+          echo "7zz: $SEVENZIP"
 
           # --------------------------------------------------------
-          # Create the Windows-style tool names expected by build.ps1
+          # Create Windows-style names expected by build.ps1
           # --------------------------------------------------------
 
           ln -sf "$CLANG" \
@@ -182,208 +224,15 @@ jobs:
           echo "$TOOLS" >> "$GITHUB_PATH"
 
           echo "======================================"
-          echo "LLVM STRIP VERSION"
-          echo "======================================"
-
-          "$STRIP" --version
-
-          echo "======================================"
-          echo "7-ZIP CHECK"
-          echo "======================================"
-
-          "$TOOLS/7z.exe" --help >/dev/null
-
-          echo "7z.exe is working."
-
-          echo "======================================"
           echo "TOOLS READY"
           echo "======================================"
 
           ls -la "$TOOLS"
-                # ============================================================
-      # 7. BUILD IPA
-      # ============================================================
-      - name: Build IPA
-        shell: bash
-        run: |
-          set -e
 
-          echo "======================================"
-          echo "START BUILD"
-          echo "======================================"
+          "$STRIP" --version
+          "$TOOLS/7z.exe" --help >/dev/null
 
-          cd "$PROJECT_ROOT"
-
-          pwsh -NoProfile -ExecutionPolicy Bypass \
-            -File "$BUILD_SCRIPT" \
-            -OutputDirectory "$RELEASE_DIR"
-
-          echo "======================================"
-          echo "BUILD FINISHED"
-          echo "======================================"
-
-      # ============================================================
-      # ============================================================
-# 8. CHECK IPA
-# ============================================================
-- name: Check IPA
-        shell: bash
-        run: |
-          set -e
-
-          echo "======================================"
-          echo "SEARCHING FOR IPA"
-          echo "======================================"
-
-          echo "PROJECT_ROOT:"
-          echo "$PROJECT_ROOT"
-
-          echo "RELEASE_DIR:"
-          echo "$RELEASE_DIR"
-
-          echo "======================================"
-          echo "RELEASE FILES"
-          echo "======================================"
-
-          if [ -d "$RELEASE_DIR" ]; then
-            find "$RELEASE_DIR" -maxdepth 5 -type f -print
-          else
-            echo "Release directory does not exist."
-          fi
-
-          echo "======================================"
-          echo "SEARCH ALL IPA FILES"
-          echo "======================================"
-
-          mapfile -t IPA_FILES < <(
-            find "$GITHUB_WORKSPACE" \
-              -type f \
-              -name "*.ipa" \
-              -print
-          )
-
-          IPA_COUNT="${#IPA_FILES[@]}"
-
-          echo "IPA COUNT: $IPA_COUNT"
-
-          if [ "$IPA_COUNT" -eq 0 ]; then
-            echo "======================================"
-            echo "NO IPA FOUND"
-            echo "======================================"
-
-            echo "Searching for APP bundles:"
-            find "$GITHUB_WORKSPACE" \
-              -type d \
-              -name "*.app" \
-              -print
-
-            echo "Searching for ZIP files:"
-            find "$GITHUB_WORKSPACE" \
-              -type f \
-              -name "*.zip" \
-              -print
-
-            echo "The build completed, but no .ipa file was found."
-            exit 1
-          fi
-
-          echo "======================================"
-          echo "IPA FOUND"
-          echo "======================================"
-
-          for IPA in "${IPA_FILES[@]}"; do
-            echo "$IPA"
-          done
-
-          mkdir -p "$RELEASE_DIR"
-
-          for IPA in "${IPA_FILES[@]}"; do
-            cp -f "$IPA" "$RELEASE_DIR/"
-          done
-
-          echo "======================================"
-          echo "FINAL IPA FILES"
-          echo "======================================"
-
-          find "$RELEASE_DIR" \
-            -type f \
-            -name "*.ipa" \
-            -print
-
-          echo "======================================"
-          echo "RELEASE FILES"
-          echo "======================================"
-
-          mkdir -p "$RELEASE_DIR"
-
-          find "$RELEASE_DIR" -type f -maxdepth 1 -print || true
-
-          echo "======================================"
-          echo "IPA FILES"
-          echo "======================================"
-
-          IPA_COUNT="$(find "$RELEASE_DIR" -type f -name "*.ipa" | wc -l | tr -d ' ')"
-
-          echo "IPA COUNT: $IPA_COUNT"
-
-          if [ "$IPA_COUNT" -eq 0 ]; then
-            echo "No IPA file was generated."
-            exit 1
-          fi
-
-      # ============================================================
-      # 9. UPLOAD IPA
-      # ============================================================
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: FF-Cache-Manager-IPA
-          path: ${{ env.RELEASE_DIR }}/*.ipa
-          if-no-files-found: error
-
-      # ============================================================
-      # 7. PYTHON + LIEF + PILLOW
-      # ============================================================
-      - name: Install Python dependency
-        shell: bash
-        run: |
-          set -e
-
-          python3 -m venv "$GITHUB_WORKSPACE/.venv"
-
-          . "$GITHUB_WORKSPACE/.venv/bin/activate"
-
-          echo "======================================"
-          echo "INSTALL PYTHON DEPENDENCIES"
-          echo "======================================"
-
-          python -m pip install --upgrade pip
-
-          # LIEF = binary manipulation used by the project
-          # Pillow = provides the PIL module used by icon generation
-          python -m pip install lief Pillow
-
-          echo "======================================"
-          echo "PYTHON"
-          echo "======================================"
-
-          python --version
-
-          echo "======================================"
-          echo "LIEF"
-          echo "======================================"
-
-          python -c "import lief; print('LIEF:', lief.__version__)"
-
-          echo "======================================"
-          echo "PILLOW / PIL"
-          echo "======================================"
-
-          python -c "from PIL import Image, ImageDraw; import PIL; print('Pillow:', PIL.__version__); print('PIL import OK')"
-
-          echo "======================================"
-          echo "PYTHON DEPENDENCIES READY"
-          echo "======================================"
+          echo "7z.exe is working."
 
       # ============================================================
       # 8. VERIFY PROJECT
@@ -394,7 +243,7 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "PROJECT"
+          echo "VERIFY PROJECT"
           echo "======================================"
 
           echo "PROJECT_ROOT:"
@@ -409,37 +258,13 @@ jobs:
           test -f "$BUILD_SCRIPT"
           test -f "$PROJECT_ROOT/app/ff_manager/build.ps1"
 
-          echo "BUILD-WINDOWS.ps1 found."
-          echo "build.ps1 found."
-
-          echo "======================================"
-          echo "PYTHON CHECK"
-          echo "======================================"
-
           test -x "$GITHUB_WORKSPACE/.venv/bin/python"
 
           "$GITHUB_WORKSPACE/.venv/bin/python" \
             -c "from PIL import Image, ImageDraw; import lief; print('Python dependencies OK')"
 
-          echo "Python dependencies verified."
-
-          echo "======================================"
-          echo "7-ZIP PATH CHECK"
-          echo "======================================"
-
-          echo "$PATH"
-
           command -v 7z.exe
-
-          echo "7z.exe found in PATH."
-
-          echo "======================================"
-          echo "LLVM STRIP PATH CHECK"
-          echo "======================================"
-
           command -v llvm-strip.exe
-
-          echo "llvm-strip.exe found in PATH."
 
           echo "======================================"
           echo "PROJECT CONTENTS"
@@ -448,21 +273,19 @@ jobs:
           ls -la "$PROJECT_ROOT"
 
           echo "======================================"
-          echo "APP CONTENTS"
+          echo "FF MANAGER"
           echo "======================================"
 
           ls -la "$PROJECT_ROOT/app/ff_manager"
 
           echo "======================================"
-          echo "TOOLS CONTENTS"
+          echo "VERIFICATION PASSED"
           echo "======================================"
-
-          ls -la "$PROJECT_ROOT/app/ff_manager/.tools"
 
       # ============================================================
       # 9. BUILD IPA
       # ============================================================
-      - name: Build unsigned IPA
+      - name: Build IPA
         shell: pwsh
         env:
           IOS_SDK: ${{ env.IOS_SDK }}
@@ -475,7 +298,7 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           Write-Host "======================================"
-          Write-Host "FF Cache Manager IPA Build"
+          Write-Host "FF CACHE MANAGER IPA BUILD"
           Write-Host "======================================"
 
           Write-Host "PROJECT_ROOT:"
@@ -513,7 +336,11 @@ jobs:
               throw "BUILD-WINDOWS.ps1 was not found."
           }
 
-          if (-not (Test-Path -LiteralPath "$env:PROJECT_ROOT/app/ff_manager/build.ps1")) {
+          $BuildPS1 = Join-Path `
+            $env:PROJECT_ROOT `
+            "app/ff_manager/build.ps1"
+
+          if (-not (Test-Path -LiteralPath $BuildPS1)) {
               throw "app/ff_manager/build.ps1 was not found."
           }
 
@@ -524,10 +351,6 @@ jobs:
           if (-not (Test-Path -LiteralPath $env:PYTHON)) {
               throw "Python virtual environment was not found."
           }
-
-          Write-Host "======================================"
-          Write-Host "VERIFY PYTHON MODULES"
-          Write-Host "======================================"
 
           & $env:PYTHON -c "from PIL import Image, ImageDraw; import lief; print('PIL and LIEF OK')"
 
@@ -549,19 +372,6 @@ jobs:
               throw "7z.exe was not found."
           }
 
-          Write-Host "======================================"
-          Write-Host "VERIFICATION PASSED"
-          Write-Host "======================================"
-
-          Write-Host "UIKit/UIKit.h found."
-          Write-Host "BUILD-WINDOWS.ps1 found."
-          Write-Host "build.ps1 found."
-          Write-Host "Python found."
-          Write-Host "PIL found."
-          Write-Host "LIEF found."
-          Write-Host "llvm-strip.exe found."
-          Write-Host "7z.exe found."
-
           # --------------------------------------------------------
           # Prepare release directory
           # --------------------------------------------------------
@@ -572,7 +382,7 @@ jobs:
             -Path $env:RELEASE_DIR | Out-Null
 
           # --------------------------------------------------------
-          # Build
+          # BUILD
           # --------------------------------------------------------
 
           Write-Host "======================================"
@@ -592,15 +402,15 @@ jobs:
           Write-Host "======================================"
 
       # ============================================================
-      # 10. SHOW GENERATED FILES
+      # 10. CHECK GENERATED FILES
       # ============================================================
-      - name: Show generated files
+      - name: Check IPA
         shell: bash
         run: |
           set -e
 
           echo "======================================"
-          echo "RELEASE FILES"
+          echo "CHECK GENERATED FILES"
           echo "======================================"
 
           if [ ! -d "$RELEASE_DIR" ]; then
@@ -609,29 +419,65 @@ jobs:
             exit 1
           fi
 
-          find "$RELEASE_DIR" -maxdepth 5 -type f -print
+          echo "RELEASE_DIR:"
+          echo "$RELEASE_DIR"
 
           echo "======================================"
-          echo "IPA FILES"
+          echo "RELEASE FILES"
           echo "======================================"
 
-          IPA_COUNT="$(find "$RELEASE_DIR" -type f -name "*.ipa" | wc -l | tr -d ' ')"
+          find "$RELEASE_DIR" \
+            -maxdepth 5 \
+            -type f \
+            -print
+
+          echo "======================================"
+          echo "SEARCH IPA"
+          echo "======================================"
+
+          IPA_COUNT="$(find "$RELEASE_DIR" \
+            -type f \
+            -name "*.ipa" \
+            | wc -l \
+            | tr -d ' ')"
 
           echo "IPA COUNT: $IPA_COUNT"
 
           if [ "$IPA_COUNT" -eq 0 ]; then
             echo "No IPA file was generated."
+
+            echo "======================================"
+            echo "SEARCH APP"
+            echo "======================================"
+
+            find "$GITHUB_WORKSPACE" \
+              -type d \
+              -name "*.app" \
+              -print
+
+            echo "======================================"
+            echo "SEARCH ZIP"
+            echo "======================================"
+
+            find "$GITHUB_WORKSPACE" \
+              -type f \
+              -name "*.zip" \
+              -print
+
             exit 1
           fi
-
-          find "$RELEASE_DIR" -type f -name "*.ipa" -print
 
           echo "======================================"
           echo "IPA FOUND"
           echo "======================================"
 
+          find "$RELEASE_DIR" \
+            -type f \
+            -name "*.ipa" \
+            -print
+
       # ============================================================
-      # 11. UPLOAD IPA ARTIFACT
+      # 11. UPLOAD IPA
       # ============================================================
       - name: Upload IPA
         uses: actions/upload-artifact@v4
