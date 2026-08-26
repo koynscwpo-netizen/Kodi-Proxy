@@ -26,9 +26,9 @@ jobs:
 
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-          echo "======================================"
+          echo "========================================"
           echo "XCODE"
-          echo "======================================"
+          echo "========================================"
 
           xcodebuild -version
           xcodebuild -showsdks
@@ -41,93 +41,93 @@ jobs:
         run: |
           set -e
 
-          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 
-          if [ ! -d "$SDK" ]; then
-            echo "iPhoneOS SDK not found:"
-            echo "$SDK"
+          if [ ! -d "$IOS_SDK" ]; then
+            echo "iPhoneOS SDK not found"
             exit 1
           fi
 
-          echo "IOS_SDK=$SDK" >> "$GITHUB_ENV"
+          echo "IOS_SDK=$IOS_SDK" >> "$GITHUB_ENV"
 
-          echo "======================================"
+          echo "========================================"
           echo "IPHONEOS SDK"
-          echo "======================================"
-          echo "$SDK"
+          echo "========================================"
+          echo "$IOS_SDK"
 
-          test -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+          test -f \
+            "$IOS_SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
 
           echo "UIKit/UIKit.h OK"
 
       # ============================================================
       # 4. FIND PROJECT
       # ============================================================
-      - name: Find project
+      - name: Find project root
         shell: bash
         run: |
           set -e
 
-          PROJECT_ROOT="$GITHUB_WORKSPACE/FF-CACHE-MANAGER-SOURCE"
+          SCRIPT="$(find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name "BUILD-WINDOWS.ps1" \
+            -print -quit)"
 
-          if [ ! -d "$PROJECT_ROOT" ]; then
-            echo "Project root not found:"
-            echo "$PROJECT_ROOT"
+          if [ -z "$SCRIPT" ]; then
+            echo "BUILD-WINDOWS.ps1 not found"
             exit 1
           fi
 
-          if [ ! -f "$PROJECT_ROOT/app/ff_manager/main.m" ]; then
-            echo "main.m not found"
+          PROJECT_ROOT="$(dirname "$SCRIPT")"
+          BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
+          RELEASE_DIR="$PROJECT_ROOT/release"
+
+          if [ ! -f "$BUILD_PS1" ]; then
+            echo "build.ps1 not found:"
+            echo "$BUILD_PS1"
             exit 1
           fi
 
-          if [ ! -f "$PROJECT_ROOT/app/ff_manager/Info.plist" ]; then
-            echo "Info.plist not found"
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_ROOT/inputs/FilzaSlop_1.0.3.ipa" ]; then
-            echo "FilzaSlop_1.0.3.ipa not found"
-            exit 1
-          fi
-
+          echo "BUILD_SCRIPT=$SCRIPT" >> "$GITHUB_ENV"
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-          echo "RELEASE_DIR=$PROJECT_ROOT/release" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$RELEASE_DIR" >> "$GITHUB_ENV"
           echo "FF_TOOLS_ROOT=$PROJECT_ROOT/app/ff_manager/.tools" >> "$GITHUB_ENV"
 
-          echo "======================================"
+          echo "========================================"
           echo "PROJECT"
-          echo "======================================"
-          echo "$PROJECT_ROOT"
+          echo "========================================"
+          echo "BUILD_SCRIPT=$SCRIPT"
+          echo "PROJECT_ROOT=$PROJECT_ROOT"
+          echo "BUILD_PS1=$BUILD_PS1"
+          echo "RELEASE_DIR=$RELEASE_DIR"
 
       # ============================================================
-      # 5. INSTALL BUILD TOOLS
+      # 5. INSTALL ONLY REQUIRED EXTERNAL TOOLS
       # ============================================================
       - name: Install build tools
         shell: bash
         run: |
           set -e
 
-          brew install llvm sevenzip
+          echo "========================================"
+          echo "INSTALL BUILD TOOLS"
+          echo "========================================"
 
-          LLVM_PREFIX="$(brew --prefix llvm)"
-          LLVM_BIN="$LLVM_PREFIX/bin"
+          brew update
 
-          echo "LLVM:"
-          echo "$LLVM_BIN"
+          # Do NOT install the full Homebrew LLVM package.
+          # Xcode already provides clang, strip, lipo and
+          # install_name_tool.
+          #
+          # lld provides ld64.lld.
+          # sevenzip provides 7zz.
 
-          test -x "$LLVM_BIN/clang"
-          test -x "$LLVM_BIN/ld64.lld"
-          test -x "$LLVM_BIN/llvm-lipo"
-          test -x "$LLVM_BIN/llvm-install-name-tool"
-          test -x "$LLVM_BIN/llvm-strip"
+          brew install lld sevenzip
 
-          command -v 7zz
-
-          echo "LLVM and 7-Zip installed."
+          echo "Build tools installed."
 
       # ============================================================
-      # 6. CREATE TOOLS EXPECTED BY BUILD SCRIPT
+      # 6. PREPARE TOOL NAMES
       # ============================================================
       - name: Prepare build tools
         shell: bash
@@ -135,344 +135,323 @@ jobs:
           set -e
 
           TOOLS="$FF_TOOLS_ROOT"
-          LLVM_BIN="$(brew --prefix llvm)/bin"
 
           mkdir -p "$TOOLS"
 
-          rm -f "$TOOLS"/*
+          echo "========================================"
+          echo "PREPARE BUILD TOOLS"
+          echo "========================================"
 
-          # clang
-          ln -sf "$LLVM_BIN/clang" \
+          # --------------------------------------------------------
+          # Xcode tools
+          # --------------------------------------------------------
+
+          CLANG="$(xcrun --find clang)"
+          STRIP="$(xcrun --find strip)"
+          LIPO="$(xcrun --find lipo)"
+          INSTALL_NAME="$(xcrun --find install_name_tool)"
+
+          # --------------------------------------------------------
+          # Homebrew tools
+          # --------------------------------------------------------
+
+          LLD_PREFIX="$(brew --prefix lld)"
+          SEVENZIP="$(command -v 7zz)"
+
+          LD64_LLD="$LLD_PREFIX/bin/ld64.lld"
+
+          # --------------------------------------------------------
+          # Verify tools
+          # --------------------------------------------------------
+
+          echo "clang:"
+          echo "$CLANG"
+
+          echo "strip:"
+          echo "$STRIP"
+
+          echo "lipo:"
+          echo "$LIPO"
+
+          echo "install_name_tool:"
+          echo "$INSTALL_NAME"
+
+          echo "ld64.lld:"
+          echo "$LD64_LLD"
+
+          echo "7zz:"
+          echo "$SEVENZIP"
+
+          test -x "$CLANG"
+          test -x "$STRIP"
+          test -x "$LIPO"
+          test -x "$INSTALL_NAME"
+          test -x "$LD64_LLD"
+          test -x "$SEVENZIP"
+
+          # --------------------------------------------------------
+          # Create Windows-style names expected by build.ps1
+          # --------------------------------------------------------
+
+          ln -sf "$CLANG" \
             "$TOOLS/clang.exe"
 
-          # linker
-          ln -sf "$LLVM_BIN/ld64.lld" \
+          ln -sf "$LD64_LLD" \
             "$TOOLS/ld64.lld.exe"
 
-          # lipo
-          ln -sf "$LLVM_BIN/llvm-lipo" \
+          ln -sf "$LIPO" \
             "$TOOLS/llvm-lipo.exe"
 
-          # install_name_tool replacement
-          ln -sf "$LLVM_BIN/llvm-install-name-tool" \
+          ln -sf "$INSTALL_NAME" \
             "$TOOLS/llvm-install-name-tool.exe"
 
-          # strip
-          ln -sf "$LLVM_BIN/llvm-strip" \
+          ln -sf "$STRIP" \
             "$TOOLS/llvm-strip.exe"
 
-          # 7zip
-          ln -sf "$(command -v 7zz)" \
+          ln -sf "$SEVENZIP" \
             "$TOOLS/7z.exe"
 
           chmod +x "$TOOLS"/*
 
           echo "$TOOLS" >> "$GITHUB_PATH"
 
-          echo "======================================"
-          echo "TOOLS"
-          echo "======================================"
+          echo "========================================"
+          echo "TOOLS READY"
+          echo "========================================"
 
           ls -la "$TOOLS"
 
-          test -e "$TOOLS/clang.exe"
-          test -e "$TOOLS/ld64.lld.exe"
-          test -e "$TOOLS/llvm-lipo.exe"
-          test -e "$TOOLS/llvm-install-name-tool.exe"
-          test -e "$TOOLS/llvm-strip.exe"
-          test -e "$TOOLS/7z.exe"
+          echo "========================================"
+          echo "CLANG VERSION"
+          echo "========================================"
 
-          echo "ALL BUILD TOOLS READY"
+          "$TOOLS/clang.exe" --version
+
+          echo "========================================"
+          echo "LLD VERSION"
+          echo "========================================"
+
+          "$TOOLS/ld64.lld.exe" --version
+
+          echo "========================================"
+          echo "7-ZIP CHECK"
+          echo "========================================"
+
+          "$TOOLS/7z.exe" --help >/dev/null
+
+          echo "7z OK"
 
       # ============================================================
-      # 7. PYTHON
+      # 7. PYTHON DEPENDENCIES
       # ============================================================
       - name: Install Python dependencies
         shell: bash
         run: |
           set -e
 
+          echo "========================================"
+          echo "PYTHON"
+          echo "========================================"
+
           python3 -m venv "$GITHUB_WORKSPACE/.venv"
 
           source "$GITHUB_WORKSPACE/.venv/bin/activate"
 
           python -m pip install --upgrade pip
+
           python -m pip install lief Pillow
 
-          python -c "import lief; print('LIEF OK')"
-          python -c "from PIL import Image; print('Pillow OK')"
+          echo "Python:"
+          python --version
 
-          echo "PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
+          echo "LIEF:"
+          python -c "import lief; print(lief.__version__)"
+
+          echo "Pillow:"
+          python -c "from PIL import Image; import PIL; print(PIL.__version__)"
+
+          echo "Python dependencies OK"
 
       # ============================================================
-      # 8. VERIFY TOOLS
+      # 8. VERIFY EVERYTHING
       # ============================================================
       - name: Verify build environment
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
+          echo "========================================"
           echo "VERIFY BUILD ENVIRONMENT"
-          echo "======================================"
+          echo "========================================"
 
-          echo "clang:"
-          "$FF_TOOLS_ROOT/clang.exe" --version
+          test -f "$BUILD_SCRIPT"
+          test -f "$PROJECT_ROOT/app/ff_manager/build.ps1"
 
-          echo "ld64:"
-          "$FF_TOOLS_ROOT/ld64.lld.exe" --version
+          test -d "$IOS_SDK"
 
-          echo "lipo:"
-          "$FF_TOOLS_ROOT/llvm-lipo.exe" --version
+          test -x "$FF_TOOLS_ROOT/clang.exe"
+          test -x "$FF_TOOLS_ROOT/ld64.lld.exe"
+          test -x "$FF_TOOLS_ROOT/llvm-lipo.exe"
+          test -x "$FF_TOOLS_ROOT/llvm-install-name-tool.exe"
+          test -x "$FF_TOOLS_ROOT/llvm-strip.exe"
+          test -x "$FF_TOOLS_ROOT/7z.exe"
 
-          echo "strip:"
-          "$FF_TOOLS_ROOT/llvm-strip.exe" --version
+          echo "BUILD_SCRIPT:"
+          echo "$BUILD_SCRIPT"
 
-          echo "7zip:"
-          "$FF_TOOLS_ROOT/7z.exe" --help >/dev/null
+          echo "PROJECT_ROOT:"
+          echo "$PROJECT_ROOT"
 
-          echo "Python:"
-          "$PYTHON" --version
+          echo "IOS_SDK:"
+          echo "$IOS_SDK"
 
-          echo "======================================"
-          echo "VERIFY FILES"
-          echo "======================================"
+          echo "FF_TOOLS_ROOT:"
+          echo "$FF_TOOLS_ROOT"
 
-          test -f "$PROJECT_ROOT/app/ff_manager/main.m"
-          test -f "$PROJECT_ROOT/app/ff_manager/Info.plist"
-          test -f "$PROJECT_ROOT/app/ff_manager/FrameworkInfo.plist"
-          test -f "$PROJECT_ROOT/app/ff_manager/protect_bridge.py"
-          test -f "$PROJECT_ROOT/app/ff_manager/generate_app_icons.py"
-          test -f "$PROJECT_ROOT/app/ff_manager/update_plist_version.py"
+          echo "RELEASE_DIR:"
+          echo "$RELEASE_DIR"
 
-          test -f "$PROJECT_ROOT/inputs/FilzaSlop_1.0.3.ipa"
-
-          test -f "$PROJECT_ROOT/app/ff_manager/resources/offline/BODY.ffcache"
-          test -f "$PROJECT_ROOT/app/ff_manager/resources/offline/NECK.ffcache"
-
-          echo "ALL REQUIRED FILES FOUND"
+          echo "========================================"
+          echo "ALL CHECKS PASSED"
+          echo "========================================"
 
       # ============================================================
-      # 9. RESTORE WORKING BUILD ENGINE
-      # ============================================================
-      #
-      # The current build.ps1 in the repository is a broken wrapper.
-      # Use the known-good build implementation from commit 78ca282
-      # for this CI build.
-      #
-      # ============================================================
-      - name: Prepare CI build script
-        shell: bash
-        run: |
-          set -e
-
-          BUILD_DIR="$PROJECT_ROOT/app/ff_manager"
-
-          curl -fsSL \
-            "https://raw.githubusercontent.com/koynscwpo-netizen/Kodi-Proxy/78ca282/FF-CACHE-MANAGER-SOURCE/app/ff_manager/build.ps1" \
-            -o "$BUILD_DIR/build-ci.ps1"
-
-          test -s "$BUILD_DIR/build-ci.ps1"
-
-          # Remove the old branding gate from the CI copy.
-          # The actual source remains unchanged.
-          sed -i '' '/^\$BrandOwner = /d' "$BUILD_DIR/build-ci.ps1"
-          sed -i '' '/^\$BrandChannel = /d' "$BUILD_DIR/build-ci.ps1"
-          sed -i '' '/^\$MainSourceForBrandCheck = /d' "$BUILD_DIR/build-ci.ps1"
-          sed -i '' '/^\$MainBrandText = /d' "$BUILD_DIR/build-ci.ps1"
-
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("FF-CACHE-MANAGER-SOURCE/app/ff_manager/build-ci.ps1")
-          text = p.read_text()
-
-          lines = text.splitlines()
-
-          output = []
-          skip = False
-
-          for line in lines:
-              if line.startswith('if (-not $MainBrandText.Contains'):
-                  skip = True
-                  continue
-
-              if skip:
-                  if line.strip() == "}":
-                      skip = False
-                  continue
-
-              output.append(line)
-
-          p.write_text("\n".join(output) + "\n")
-          PY
-
-          echo "======================================"
-          echo "CI BUILD SCRIPT"
-          echo "======================================"
-
-          sed -n '1,35p' "$BUILD_DIR/build-ci.ps1"
-
-      # ============================================================
-      # 10. BUILD IPA
+      # 9. BUILD IPA
       # ============================================================
       - name: Build IPA
         shell: pwsh
         env:
           IOS_SDK: ${{ env.IOS_SDK }}
           FF_TOOLS_ROOT: ${{ env.FF_TOOLS_ROOT }}
-          PYTHON: ${{ env.PYTHON }}
-          PROJECT_ROOT: ${{ env.PROJECT_ROOT }}
-          RELEASE_DIR: ${{ env.RELEASE_DIR }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          $BuildDir = Join-Path $env:PROJECT_ROOT "app/ff_manager"
-          $BuildScript = Join-Path $BuildDir "build-ci.ps1"
-          $FilzaIpa = Join-Path $env:PROJECT_ROOT "inputs/FilzaSlop_1.0.3.ipa"
-
-          Write-Host "======================================"
+          Write-Host "========================================"
           Write-Host "BUILD IPA"
-          Write-Host "======================================"
+          Write-Host "========================================"
 
           Write-Host "PROJECT_ROOT:"
           Write-Host $env:PROJECT_ROOT
 
+          Write-Host "BUILD_SCRIPT:"
+          Write-Host $env:BUILD_SCRIPT
+
           Write-Host "IOS_SDK:"
           Write-Host $env:IOS_SDK
 
-          Write-Host "TOOLS:"
+          Write-Host "FF_TOOLS_ROOT:"
           Write-Host $env:FF_TOOLS_ROOT
 
-          Write-Host "FILZA:"
-          Write-Host $FilzaIpa
-
-          Write-Host "OUTPUT:"
+          Write-Host "RELEASE_DIR:"
           Write-Host $env:RELEASE_DIR
-
-          if (-not (Test-Path -LiteralPath $BuildScript)) {
-              throw "CI build script not found."
-          }
-
-          if (-not (Test-Path -LiteralPath $FilzaIpa)) {
-              throw "FilzaSlop_1.0.3.ipa not found."
-          }
-
-          if (-not (Test-Path -LiteralPath $env:IOS_SDK)) {
-              throw "iPhoneOS SDK not found."
-          }
-
-          if (-not (Test-Path -LiteralPath "$env:FF_TOOLS_ROOT/clang.exe")) {
-              throw "clang.exe not found."
-          }
-
-          if (-not (Test-Path -LiteralPath "$env:FF_TOOLS_ROOT/ld64.lld.exe")) {
-              throw "ld64.lld.exe not found."
-          }
-
-          if (-not (Test-Path -LiteralPath "$env:FF_TOOLS_ROOT/llvm-lipo.exe")) {
-              throw "llvm-lipo.exe not found."
-          }
-
-          if (-not (Test-Path -LiteralPath "$env:FF_TOOLS_ROOT/llvm-install-name-tool.exe")) {
-              throw "llvm-install-name-tool.exe not found."
-          }
-
-          if (-not (Test-Path -LiteralPath "$env:FF_TOOLS_ROOT/llvm-strip.exe")) {
-              throw "llvm-strip.exe not found."
-          }
-
-          if (-not (Test-Path -LiteralPath "$env:FF_TOOLS_ROOT/7z.exe")) {
-              throw "7z.exe not found."
-          }
 
           New-Item `
             -ItemType Directory `
             -Force `
             -Path $env:RELEASE_DIR | Out-Null
 
-          & $BuildScript `
-            -FilzaIpa "$FilzaIpa" `
-            -Offline `
+          & $env:BUILD_SCRIPT `
+            -IosSdk "$env:IOS_SDK" `
             -OutputDirectory "$env:RELEASE_DIR"
 
           if ($LASTEXITCODE -ne 0) {
-              throw "Build failed with exit code $LASTEXITCODE"
+            throw "IPA build failed with exit code $LASTEXITCODE"
           }
 
-          Write-Host "======================================"
+          Write-Host "========================================"
           Write-Host "BUILD SCRIPT FINISHED"
-          Write-Host "======================================"
+          Write-Host "========================================"
 
       # ============================================================
-      # 11. CHECK IPA
+      # 10. FIND IPA
       # ============================================================
-      - name: Check IPA
+      - name: Find IPA
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo "CHECK GENERATED FILES"
-          echo "======================================"
+          echo "========================================"
+          echo "SEARCH IPA"
+          echo "========================================"
+
+          echo "RELEASE_DIR:"
+          echo "$RELEASE_DIR"
 
           if [ ! -d "$RELEASE_DIR" ]; then
-            echo "Release directory does not exist:"
-            echo "$RELEASE_DIR"
+            echo "Release directory does not exist."
             exit 1
           fi
 
+          echo "========================================"
+          echo "RELEASE FILES"
+          echo "========================================"
+
           find "$RELEASE_DIR" \
-            -maxdepth 3 \
+            -maxdepth 5 \
             -type f \
             -print
 
-          echo "======================================"
-          echo "IPA FILES"
-          echo "======================================"
+          echo "========================================"
+          echo "SEARCH ALL IPA"
+          echo "========================================"
 
-          IPA_COUNT="$(find "$RELEASE_DIR" -type f -name "*.ipa" | wc -l | tr -d ' ')"
-
-          echo "IPA COUNT: $IPA_COUNT"
-
-          if [ "$IPA_COUNT" -eq 0 ]; then
-            echo "NO IPA WAS GENERATED"
-
-            echo "Searching entire workspace:"
+          mapfile -t IPA_FILES < <(
             find "$GITHUB_WORKSPACE" \
               -type f \
               -name "*.ipa" \
               -print
+          )
+
+          IPA_COUNT="${#IPA_FILES[@]}"
+
+          echo "IPA COUNT: $IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo ""
+            echo "NO IPA FOUND"
+            echo ""
+
+            echo "APP FILES:"
+            find "$GITHUB_WORKSPACE" \
+              -type d \
+              -name "*.app" \
+              -print || true
+
+            echo ""
+            echo "ZIP FILES:"
+            find "$GITHUB_WORKSPACE" \
+              -type f \
+              -name "*.zip" \
+              -print || true
 
             exit 1
           fi
+
+          echo "========================================"
+          echo "IPA FOUND"
+          echo "========================================"
+
+          for IPA in "${IPA_FILES[@]}"; do
+            echo "$IPA"
+          done
+
+          mkdir -p "$RELEASE_DIR"
+
+          for IPA in "${IPA_FILES[@]}"; do
+            cp -f "$IPA" "$RELEASE_DIR/"
+          done
+
+          echo "========================================"
+          echo "FINAL IPA"
+          echo "========================================"
 
           find "$RELEASE_DIR" \
             -type f \
             -name "*.ipa" \
             -print
 
-          echo "IPA FOUND"
-
       # ============================================================
-      # 12. SHOW SHA256
-      # ============================================================
-      - name: Show IPA checksum
-        shell: bash
-        run: |
-          set -e
-
-          for IPA in "$RELEASE_DIR"/*.ipa; do
-            if [ -f "$IPA" ]; then
-              echo "======================================"
-              echo "SHA256"
-              echo "======================================"
-              shasum -a 256 "$IPA"
-            fi
-          done
-
-      # ============================================================
-      # 13. UPLOAD IPA
+      # 11. UPLOAD IPA
       # ============================================================
       - name: Upload IPA
         uses: actions/upload-artifact@v4
