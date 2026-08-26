@@ -225,10 +225,89 @@ jobs:
       # ============================================================
       # 8. CHECK IPA
       # ============================================================
-      - name: Check IPA
+            - name: Check IPA
         shell: bash
         run: |
           set -e
+
+          echo "======================================"
+          echo "SEARCHING FOR IPA"
+          echo "======================================"
+
+          echo "PROJECT_ROOT:"
+          echo "$PROJECT_ROOT"
+
+          echo "RELEASE_DIR:"
+          echo "$RELEASE_DIR"
+
+          echo "======================================"
+          echo "RELEASE FILES"
+          echo "======================================"
+
+          if [ -d "$RELEASE_DIR" ]; then
+            find "$RELEASE_DIR" -maxdepth 5 -type f -print
+          else
+            echo "Release directory does not exist."
+          fi
+
+          echo "======================================"
+          echo "SEARCH ALL IPA FILES"
+          echo "======================================"
+
+          mapfile -t IPA_FILES < <(
+            find "$GITHUB_WORKSPACE" \
+              -type f \
+              -name "*.ipa" \
+              -print
+          )
+
+          IPA_COUNT="${#IPA_FILES[@]}"
+
+          echo "IPA COUNT: $IPA_COUNT"
+
+          if [ "$IPA_COUNT" -eq 0 ]; then
+            echo "======================================"
+            echo "NO IPA FOUND"
+            echo "======================================"
+
+            echo "Searching for APP bundles:"
+            find "$GITHUB_WORKSPACE" \
+              -type d \
+              -name "*.app" \
+              -print
+
+            echo "Searching for ZIP files:"
+            find "$GITHUB_WORKSPACE" \
+              -type f \
+              -name "*.zip" \
+              -print
+
+            echo "The build completed, but no .ipa file was found."
+            exit 1
+          fi
+
+          echo "======================================"
+          echo "IPA FOUND"
+          echo "======================================"
+
+          for IPA in "${IPA_FILES[@]}"; do
+            echo "$IPA"
+          done
+
+          mkdir -p "$RELEASE_DIR"
+
+          for IPA in "${IPA_FILES[@]}"; do
+            cp -f "$IPA" "$RELEASE_DIR/"
+          done
+
+          echo "======================================"
+          echo "FINAL IPA FILES"
+          echo "======================================"
+
+          find "$RELEASE_DIR" \
+            -type f \
+            -name "*.ipa" \
+            -print
 
           echo "======================================"
           echo "RELEASE FILES"
