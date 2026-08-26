@@ -1,221 +1,318 @@
-param(
-    [string]$FilzaIpa,
-    [switch]$Offline = $true,
-    [string]$OutputDirectory
-)
+name: Build
 
-$ErrorActionPreference = "Stop"
-$BrandOwner = "@FAKHERDDIN5"
-$BrandChannel = "https://t.me/+yzTUmx4f-ck5N2M0"
-$MainSourceForBrandCheck = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "main.m"
-$MainBrandText = Get-Content -LiteralPath $MainSourceForBrandCheck -Raw
-if (-not $MainBrandText.Contains($BrandOwner) -or -not $MainBrandText.Contains($BrandChannel)) {
-    throw "Official brand identity is missing or modified."
-}
+on:
+  workflow_dispatch:
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $Root "release"
-}
-$OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-$ToolsRoot = if ($env:FF_TOOLS_ROOT) { $env:FF_TOOLS_ROOT } else { Join-Path $Root ".tools" }
-$Sdk = if ($env:IOS_SDK) { $env:IOS_SDK } else { Join-Path $Root "iPhoneOS.sdk" }
+permissions:
+  contents: read
 
-function Find-Tool([string]$Name) {
-    $cmd = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    if (Test-Path -LiteralPath $ToolsRoot) {
-        $found = Get-ChildItem -LiteralPath $ToolsRoot -Recurse -File -Filter $Name -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) { return $found.FullName }
-    }
-    return $null
-}
+jobs:
+  build:
+    name: Build
+    runs-on: macos-latest
 
-$Clang = Find-Tool "clang.exe"
-$Linker = Find-Tool "ld64.lld.exe"
-$Lipo = Find-Tool "llvm-lipo.exe"
-$InstallNameTool = Find-Tool "llvm-install-name-tool.exe"
-$Strip = Find-Tool "llvm-strip.exe"
-$Python = if ($env:PYTHON) { $env:PYTHON } else { (Get-Command python -ErrorAction SilentlyContinue).Source }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-if ([string]::IsNullOrWhiteSpace($FilzaIpa)) {
-    $candidates = @(
-        (Join-Path $Root "FilzaSlop_1.0.3.ipa"),
-        (Join-Path (Split-Path -Parent (Split-Path -Parent $Root)) "FilzaSlop_1.0.3.ipa"),
-        (Join-Path (Split-Path -Parent (Split-Path -Parent $Root)) "inputs\FilzaSlop_1.0.3.ipa")
-    )
-    $FilzaIpa = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-}
-$FFCacheManagerBackground = Join-Path $Root "FFCacheManagerBackground.jpg"
-$BrandImage = $FFCacheManagerBackground
-$Build = Join-Path ([System.IO.Path]::GetTempPath()) ("FFCacheManager-v100-" + [Guid]::NewGuid().ToString("N"))
-$Object = Join-Path $Build "main.o"
-$SourceFile = Join-Path $Build "main.m"
-$Payload = Join-Path $Build "Payload"
-$App = Join-Path $Payload "FFCacheManager.app"
-$Frameworks = Join-Path $App "Frameworks"
-$FrameworkBundle = Join-Path $Frameworks "CoreTelemetry.framework"
-$Executable = Join-Path $App "FFCacheManager"
-$ProtectedBridge = Join-Path $FrameworkBundle "CoreTelemetry"
-$ProtectionMetadata = Join-Path $Build "protected-core.json"
-$ProtectedConfig = Join-Path $Build "ProtectedConfig.h"
-$IpaBaseName = if ($Offline) { "FFCacheManager-v100-Offline-Unsigned.ipa" } else { "FFCacheManager-v100-Signer-Compatible.ipa" }
-$Ipa = Join-Path $Build $IpaBaseName
-$ReleaseManifest = Join-Path $Build "FFCacheManager-release-manifest-v100.json"
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -e
 
-$Dependencies = [ordered]@{
-    "clang.exe" = $Clang
-    "ld64.lld.exe" = $Linker
-    "llvm-lipo.exe" = $Lipo
-    "llvm-install-name-tool.exe" = $InstallNameTool
-    "llvm-strip.exe" = $Strip
-    "python" = $Python
-    "iPhoneOS.sdk" = $Sdk
-    "FilzaSlop_1.0.3.ipa" = $FilzaIpa
-    "FFCacheManagerBackground.jpg" = $FFCacheManagerBackground
-}
-foreach ($entry in $Dependencies.GetEnumerator()) {
-    if ([string]::IsNullOrWhiteSpace([string]$entry.Value) -or -not (Test-Path -LiteralPath $entry.Value)) {
-        throw "Missing build dependency: $($entry.Key). Run .\SETUP-WINDOWS.ps1 -CheckOnly for the expected locations."
-    }
-}
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-New-Item -ItemType Directory -Path $FrameworkBundle -Force | Out-Null
-$SevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
-if (-not $SevenZip) {
-    $SevenZipDefault = "C:\Program Files\7-Zip\7z.exe"
-    if (Test-Path -LiteralPath $SevenZipDefault -PathType Leaf) { $SevenZip = $SevenZipDefault }
-}
-if (-not $SevenZip) { throw "Missing 7-Zip (7z.exe). Install 7-Zip or add it to PATH." }
-& $SevenZip e -y "-o$Build" $FilzaIpa "Payload/Filza.app/Frameworks/FilzaApplySandboxExt.dylib" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Could not extract Filza sandbox bridge ($LASTEXITCODE)" }
-$SandboxBridge = Join-Path $Build "FilzaApplySandboxExt.dylib"
-if (-not (Test-Path -LiteralPath $SandboxBridge -PathType Leaf)) { throw "Sandbox bridge missing after extraction" }
+          echo "========================================"
+          echo "XCODE"
+          echo "========================================"
+          xcodebuild -version
+          xcodebuild -showsdks
 
-& $Strip --strip-debug $SandboxBridge
-if ($LASTEXITCODE -ne 0) { throw "Debug-symbol stripping failed ($LASTEXITCODE)" }
+      - name: Locate iPhoneOS SDK
+        shell: bash
+        run: |
+          set -e
 
-& $InstallNameTool -id "@rpath/CoreTelemetry.framework/CoreTelemetry" $SandboxBridge
-if ($LASTEXITCODE -ne 0) { throw "Bridge install-name protection failed ($LASTEXITCODE)" }
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 
-& $Python (Join-Path $Root "protect_bridge.py") $SandboxBridge $ProtectedBridge $ProtectionMetadata
-if ($LASTEXITCODE -ne 0) { throw "Bridge export protection failed ($LASTEXITCODE)" }
-Remove-Item -LiteralPath $SandboxBridge -Force
+          if [ ! -f "$SDK/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h" ]; then
+            echo "UIKit SDK headers not found"
+            exit 1
+          fi
 
-$metadata = Get-Content -LiteralPath $ProtectionMetadata -Raw | ConvertFrom-Json
-if ($metadata.slices.Count -ne 2) { throw "Expected two protected core integrity records" }
-$config = @"
-#define FMCORE_TEXT_SHA256_A @"$($metadata.slices[0].text_sha256)"
-#define FMCORE_EXPORT_SHA256_A @"$($metadata.slices[0].export_sha256)"
-#define FMCORE_SECTION_SHA256_A @"$($metadata.slices[0].section_sha256)"
-#define FMCORE_TEXT_SHA256_B @"$($metadata.slices[1].text_sha256)"
-#define FMCORE_EXPORT_SHA256_B @"$($metadata.slices[1].export_sha256)"
-#define FMCORE_SECTION_SHA256_B @"$($metadata.slices[1].section_sha256)"
-"@
-[System.IO.File]::WriteAllText($ProtectedConfig, $config, [System.Text.UTF8Encoding]::new($false))
+          echo "IOS_SDK=$SDK" >> "$GITHUB_ENV"
 
-Copy-Item -LiteralPath (Join-Path $Root "main.m") -Destination $SourceFile -Force
+          echo "========================================"
+          echo "IPHONEOS SDK"
+          echo "========================================"
+          echo "$SDK"
 
-$ClangArgs = @(
-    "-arch","arm64","-target","arm64-apple-ios15.0","-isysroot",$Sdk,
-    "-fobjc-arc","-Os","-fstack-protector-strong","-fvisibility=hidden","-fomit-frame-pointer","-fno-ident",
-    "-Werror","-Wno-deprecated-declarations"
-)
-if ($Offline) { $ClangArgs += "-DFM_OFFLINE_BUILD=1" }
-$ClangArgs += "-DFM_RELEASE_BUILD=1"
-$ClangArgs += "-DFM_REQUIRE_SIGNED_RESPONSES=1"
-$ClangArgs += @("-I",$Build,"-c",$SourceFile,"-o",$Object)
-& $Clang @ClangArgs
-if ($LASTEXITCODE -ne 0) { throw "Compile failed ($LASTEXITCODE)" }
+      - name: Locate project
+        shell: bash
+        run: |
+          set -e
 
-& $Linker -arch arm64 -platform_version ios 15.0 15.0 -syslibroot $Sdk `
-    -e _main -adhoc_codesign -dead_strip $Object `
-    -framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore -framework Security `
-    -framework UniformTypeIdentifiers -lobjc -lSystem -o $Executable
-if ($LASTEXITCODE -ne 0) { throw "Link failed ($LASTEXITCODE)" }
+          PROJECT_ROOT="$GITHUB_WORKSPACE/FF-CACHE-MANAGER-SOURCE"
+          BUILD_PS1="$PROJECT_ROOT/app/ff_manager/build.ps1"
 
-& $Strip -x $Executable
-if ($LASTEXITCODE -ne 0) { throw "Application symbol stripping failed ($LASTEXITCODE)" }
+          if [ ! -d "$PROJECT_ROOT" ]; then
+            echo "FF-CACHE-MANAGER-SOURCE not found"
+            exit 1
+          fi
 
-$AppInfoPath = Join-Path $App "Info.plist"
-Copy-Item -LiteralPath (Join-Path $Root "Info.plist") -Destination $AppInfoPath -Force
-Copy-Item -LiteralPath $FFCacheManagerBackground -Destination (Join-Path $App "FFCacheManagerBackground.jpg") -Force
-if ($Offline) {
-    & $Python (Join-Path $Root "update_plist_version.py") $AppInfoPath "1.0" "1"
-    if ($LASTEXITCODE -ne 0) { throw "Canonical Info.plist generation failed ($LASTEXITCODE)" }
-}
-Copy-Item -LiteralPath (Join-Path $Root "FrameworkInfo.plist") -Destination (Join-Path $FrameworkBundle "Info.plist") -Force
+          if [ ! -f "$BUILD_PS1" ]; then
+            echo "build.ps1 not found:"
+            echo "$BUILD_PS1"
+            exit 1
+          fi
 
-$IconSource = if ($BrandImage -and (Test-Path -LiteralPath $BrandImage -PathType Leaf)) { $BrandImage } else { "--fallback" }
-& $Python (Join-Path $Root "generate_app_icons.py") $IconSource $App
-if ($LASTEXITCODE -ne 0) { throw "Application icon generation failed ($LASTEXITCODE)" }
-if ($IconSource -eq "--fallback") {
-    Write-Output "[branding] Generated the built-in FF Cache Manager launcher icon."
-}
+          RELEASE_DIR="$PROJECT_ROOT/release"
+          TOOLS_DIR="$PROJECT_ROOT/app/ff_manager/.tools"
 
-if ($Offline) {
-    $OfflineSource = Join-Path $Root "resources\offline"
-    $CacheBody = Join-Path $OfflineSource "BODY.ffcache"
-    $CacheNeck = Join-Path $OfflineSource "NECK.ffcache"
-    foreach ($required in @($CacheBody, $CacheNeck)) {
-        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing bundled offline cache file: $required" }
-    }
-    $OfflineCache = Join-Path $App "OfflineCache"
-    New-Item -ItemType Directory -Path $OfflineCache -Force | Out-Null
-    $FeatureToSource = @{ BODY = $CacheBody; NECK = $CacheNeck }
-    foreach ($feature in $FeatureToSource.Keys) {
-        # Keep the canonical OfflineCache copy and a root-level fallback. Some
-        # third-party signing/repacking tools can alter resource subdirectories.
-        Copy-Item -LiteralPath $FeatureToSource[$feature] -Destination (Join-Path $OfflineCache "$feature.ffcache") -Force
-        Copy-Item -LiteralPath $FeatureToSource[$feature] -Destination (Join-Path $App "$feature.ffcache") -Force
-    }
-    Write-Output "[offline] bundled local profiles: BODY, NECK (OfflineCache + root fallback)"
-}
+          mkdir -p "$RELEASE_DIR"
+          mkdir -p "$TOOLS_DIR"
 
-Push-Location $Build
-try {
-    & $SevenZip a -tzip -mx=9 $Ipa "Payload" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "IPA packaging failed ($LASTEXITCODE)" }
-} finally {
-    Pop-Location
-}
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "BUILD_PS1=$BUILD_PS1" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$RELEASE_DIR" >> "$GITHUB_ENV"
+          echo "TOOLS_DIR=$TOOLS_DIR" >> "$GITHUB_ENV"
 
-if (-not $Offline) {
-    & $Python (Join-Path $Root "generate_release_manifest.py") $App $ReleaseManifest
-    if ($LASTEXITCODE -ne 0) { throw "Release manifest generation failed ($LASTEXITCODE)" }
+          echo "========================================"
+          echo "PROJECT"
+          echo "========================================"
+          echo "$PROJECT_ROOT"
+          echo "$BUILD_PS1"
 
-    & $Python (Join-Path $Root "verify_build.py") $Build
-    if ($LASTEXITCODE -ne 0) { throw "Security verification failed ($LASTEXITCODE)" }
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -e
 
-    # Publish only the verified pair.  The manifest is generated from this
-    # exact app bundle and is retained only for non-offline compatibility.
-    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $PublishedIpa = Join-Path $OutputDirectory $IpaBaseName
-    $PublishedManifest = Join-Path $OutputDirectory "FFCacheManager-release-manifest-v100.json"
-    $PublishedChecksums = Join-Path $OutputDirectory "FFCacheManager-v100-Signer-Compatible.sha256"
-    Copy-Item -LiteralPath $Ipa -Destination $PublishedIpa -Force
-    Copy-Item -LiteralPath $ReleaseManifest -Destination $PublishedManifest -Force
+          brew install llvm sevenzip
 
-    & $Python (Join-Path $Root "verify_build.py") $Build --ipa $PublishedIpa --manifest $PublishedManifest
-    if ($LASTEXITCODE -ne 0) { throw "Security verification failed ($LASTEXITCODE)" }
+          LLVM="$(brew --prefix llvm)/bin"
 
-    @(
-        "{0} *{1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $PublishedIpa).Hash.ToUpperInvariant(), $IpaBaseName
-        "{0} *{1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $PublishedManifest).Hash.ToUpperInvariant(), "FFCacheManager-release-manifest-v100.json"
-    ) | Set-Content -LiteralPath $PublishedChecksums -Encoding ascii
-}
+          CLANG="$LLVM/clang"
+          STRIP="$LLVM/llvm-strip"
+          LIPO="$(xcrun --find lipo)"
+          INSTALL_NAME="$(xcrun --find install_name_tool)"
+          LD="$(xcrun --find ld)"
+          SEVENZIP="$(command -v 7zz)"
 
-& $Lipo -info $Executable
-if ($Offline) {
-    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $PublishedIpa = Join-Path $OutputDirectory $IpaBaseName
-    Copy-Item -LiteralPath $Ipa -Destination $PublishedIpa -Force
-    $PublishedChecksum = Join-Path $OutputDirectory ($IpaBaseName + ".sha256")
-    ("{0} *{1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $PublishedIpa).Hash.ToUpperInvariant(), $IpaBaseName) | Set-Content -LiteralPath $PublishedChecksum -Encoding ascii
-    Write-Output "Built unsigned IPA: $PublishedIpa"
-    Write-Output "SHA256: $PublishedChecksum"
-} else {
-    Write-Output "Built: $PublishedIpa"
-    Write-Output "Release manifest: $PublishedManifest"
-    Write-Output "Checksums: $PublishedChecksums"
-}
+          test -x "$CLANG"
+          test -x "$STRIP"
+          test -x "$LIPO"
+          test -x "$INSTALL_NAME"
+          test -x "$LD"
+          test -x "$SEVENZIP"
+
+          ln -sf "$CLANG" \
+            "$TOOLS_DIR/clang.exe"
+
+          ln -sf "$STRIP" \
+            "$TOOLS_DIR/llvm-strip.exe"
+
+          ln -sf "$LIPO" \
+            "$TOOLS_DIR/llvm-lipo.exe"
+
+          ln -sf "$INSTALL_NAME" \
+            "$TOOLS_DIR/llvm-install-name-tool.exe"
+
+          ln -sf "$LD" \
+            "$TOOLS_DIR/ld64.lld.exe"
+
+          ln -sf "$SEVENZIP" \
+            "$TOOLS_DIR/7z.exe"
+
+          chmod +x "$TOOLS_DIR"/*
+
+          echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+
+          echo "========================================"
+          echo "BUILD TOOLS"
+          echo "========================================"
+
+          "$TOOLS_DIR/clang.exe" --version
+          "$TOOLS_DIR/llvm-strip.exe" --version
+          "$TOOLS_DIR/7z.exe" --help >/dev/null
+
+          echo "All build tools ready."
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          set -e
+
+          python3 -m venv "$GITHUB_WORKSPACE/.venv"
+
+          "$GITHUB_WORKSPACE/.venv/bin/python" -m pip install --upgrade pip
+          "$GITHUB_WORKSPACE/.venv/bin/python" -m pip install lief Pillow
+
+          echo "PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
+
+          "$GITHUB_WORKSPACE/.venv/bin/python" -c \
+            "import lief; from PIL import Image; print('Python dependencies OK')"
+
+      - name: Verify project files
+        shell: bash
+        run: |
+          set -e
+
+          test -f "$BUILD_PS1"
+          test -f "$PROJECT_ROOT/app/ff_manager/main.m"
+          test -f "$PROJECT_ROOT/app/ff_manager/Info.plist"
+          test -f "$PROJECT_ROOT/app/ff_manager/FrameworkInfo.plist"
+          test -f "$PROJECT_ROOT/app/ff_manager/protect_bridge.py"
+          test -f "$PROJECT_ROOT/app/ff_manager/generate_app_icons.py"
+          test -f "$PROJECT_ROOT/app/ff_manager/update_plist_version.py"
+
+          echo "========================================"
+          echo "PROJECT FILE CHECK"
+          echo "========================================"
+
+          echo "build.ps1 OK"
+          echo "main.m OK"
+          echo "Info.plist OK"
+          echo "FrameworkInfo.plist OK"
+          echo "protect_bridge.py OK"
+          echo "generate_app_icons.py OK"
+          echo "update_plist_version.py OK"
+
+      - name: Find Filza IPA
+        shell: bash
+        run: |
+          set -e
+
+          FOUND=""
+
+          for FILE in \
+            "$PROJECT_ROOT/app/ff_manager/FilzaSlop_1.0.3.ipa" \
+            "$PROJECT_ROOT/FilzaSlop_1.0.3.ipa" \
+            "$PROJECT_ROOT/inputs/FilzaSlop_1.0.3.ipa" \
+            "$GITHUB_WORKSPACE/FilzaSlop_1.0.3.ipa"
+          do
+            if [ -f "$FILE" ]; then
+              FOUND="$FILE"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND" ]; then
+            FOUND="$(find "$GITHUB_WORKSPACE" \
+              -type f \
+              -name "FilzaSlop_1.0.3.ipa" \
+              -print -quit)"
+          fi
+
+          if [ -z "$FOUND" ]; then
+            echo "FilzaSlop_1.0.3.ipa was not found."
+            exit 1
+          fi
+
+          echo "FILZA_IPA=$FOUND" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "FILZA IPA"
+          echo "========================================"
+          echo "$FOUND"
+
+      - name: Build IPA
+        shell: pwsh
+        env:
+          IOS_SDK: ${{ env.IOS_SDK }}
+          FF_TOOLS_ROOT: ${{ env.TOOLS_DIR }}
+          PYTHON: ${{ env.PYTHON }}
+          FILZA_IPA: ${{ env.FILZA_IPA }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "========================================"
+          Write-Host "BUILD IPA"
+          Write-Host "========================================"
+
+          Write-Host "Project:"
+          Write-Host "${env:PROJECT_ROOT}"
+
+          Write-Host "SDK:"
+          Write-Host "${env:IOS_SDK}"
+
+          Write-Host "Tools:"
+          Write-Host "${env:FF_TOOLS_ROOT}"
+
+          Write-Host "Filza:"
+          Write-Host "${env:FILZA_IPA}"
+
+          if (-not (Test-Path -LiteralPath "${env:BUILD_PS1}")) {
+              throw "build.ps1 not found"
+          }
+
+          if (-not (Test-Path -LiteralPath "${env:IOS_SDK}")) {
+              throw "iPhoneOS SDK not found"
+          }
+
+          if (-not (Test-Path -LiteralPath "${env:FILZA_IPA}")) {
+              throw "Filza IPA not found"
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path "${env:RELEASE_DIR}" | Out-Null
+
+          & pwsh `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File "${env:BUILD_PS1}" `
+            -FilzaIpa "${env:FILZA_IPA}" `
+            -Offline `
+            -OutputDirectory "${env:RELEASE_DIR}"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Build failed with exit code $LASTEXITCODE"
+          }
+
+          Write-Host "========================================"
+          Write-Host "BUILD FINISHED"
+          Write-Host "========================================"
+
+      - name: Verify IPA
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "VERIFY IPA"
+          echo "========================================"
+
+          if [ ! -d "$RELEASE_DIR" ]; then
+            echo "Release directory not found:"
+            echo "$RELEASE_DIR"
+            exit 1
+          fi
+
+          find "$RELEASE_DIR" -maxdepth 2 -type f -print
+
+          IPA="$(find "$RELEASE_DIR" \
+            -maxdepth 2 \
+            -type f \
+            -name "*.ipa" \
+            -print -quit)"
+
+          if [ -z "$IPA" ]; then
+            echo "No IPA was generated."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "IPA FOUND"
+          echo "========================================"
+          echo "$IPA"
+
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FF-Cache-Manager-IPA
+          path: ${{ env.RELEASE_DIR }}/*.ipa
+          if-no-files-found: error
